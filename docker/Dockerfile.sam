@@ -1,0 +1,25 @@
+# SAM 2 image — for Stage 4b (sam2-propagate).
+# Base: official PyTorch image with CUDA 12.1 + cuDNN 9 (works on RTX 3090 / 4090 / 5090).
+FROM pytorch/pytorch:2.5.0-cuda12.1-cudnn9-runtime
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1
+
+# System tools needed for pip install git+...
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git ffmpeg ca-certificates wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pipeline shared deps (match the requirements.txt minus torch which is in base)
+RUN pip install --no-cache-dir \
+        opencv-python tqdm matplotlib pillow "numpy<2"
+
+# SAM 2 from upstream (clean env → no libffi nonsense here)
+RUN pip install --no-cache-dir git+https://github.com/facebookresearch/sam2.git
+
+# Default workdir; pipeline code is mounted at runtime via -v
+WORKDIR /workspace
+
+# Sanity log on startup (helps debug)
+CMD ["bash", "-c", "python -c \"import torch, sam2; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), 'device', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'cpu')\" && exec bash"]

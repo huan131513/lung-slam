@@ -1,0 +1,36 @@
+# Pipeline outputs
+out/
+out.zip
+*.zip
+*.tar
+*.tar.gz
+*.mov
+*.mp4
+*.avi
+
+# Model weights (download separately on Linux)
+*.pth
+*.pt
+*.ckpt
+models/
+weights/
+
+# PDFs / large reference docs
+*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.python-version
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Docker
+.docker-cache/

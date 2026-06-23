@@ -1,0 +1,22 @@
+# Core (Mac + Windows 都需要)
+numpy>=1.24
+opencv-python>=4.8
+Pillow>=10.0
+tqdm>=4.66
+matplotlib>=3.7
+
+# Stage 8 視覺化
+open3d>=0.18
+
+# Stage 4 (SAM 2) — Windows + CUDA 才裝
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# pip install git+https://github.com/facebookresearch/sam2.git
+# 模型權重: https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt
+
+# Stage 7 (DROID-SLAM) — Windows + CUDA 才裝
+# git clone https://github.com/princeton-vl/DROID-SLAM
+# cd DROID-SLAM && python setup.py install
+# 模型權重: 從 repo README 下載 droid.pth
+
+# Stage 6 (optional, COLMAP refine 才需要)
+# pycolmap>=0.6

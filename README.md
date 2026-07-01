@@ -3,7 +3,7 @@
 Endoscopic 3D reconstruction pipeline — recover camera trajectory + sparse 3D
 points from monocular thoracoscopic video.
 
-Plan: [`PLAN.md`](PLAN.md) · Docker setup: [`docker/README.md`](docker/README.md)
+Plan: [`PLAN.md`](PLAN.md) · **Ubuntu quickstart: [`UBUNTU_RUN.md`](UBUNTU_RUN.md)** · Docker setup: [`docker/README.md`](docker/README.md)
 
 ---
 

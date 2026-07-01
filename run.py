@@ -28,7 +28,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from pipeline import calib, droid_runner, extract, masks, sam2_runner, viz
+from pipeline import calib, droid_runner, extract, masks, preprocess, sam2_runner, viz
 from pipeline.common import bold, cyan, log, probe_env, section
 
 
@@ -66,6 +66,26 @@ def cmd_extract(args):
     section("Stage 1 — Extract frames")
     p = paths(args.out)
     extract.run(Path(args.video), p["out"], target_width=args.width, force=args.force)
+
+
+def cmd_preprocess(args):
+    """Stage 1+2 combined: extract + FOV crop + distortion trim + calib.txt.
+
+    Produces DROID-SLAM-ready layout: out/{frames, calib.txt, preview.png}.
+    """
+    section("Preprocess — video → cropped frames + calib.txt (DROID-SLAM ready)")
+    p = paths(args.out)
+    fps = args.fps if args.fps and args.fps > 0 else None
+    preprocess.run(
+        video=Path(args.video),
+        out_dir=p["out"],
+        target_width=args.width,
+        target_fps=fps,
+        distortion_margin=args.distortion_margin,
+        assumed_fov_deg=args.assumed_fov_deg,
+        fov_threshold=args.fov_threshold,
+        keep_raw=args.keep_raw,
+    )
 
 
 def cmd_fovmask(args):
@@ -155,6 +175,20 @@ def cmd_all_cuda(args):
     cmd_viz(args)
 
 
+def cmd_all_droid(args):
+    """Direct DROID-SLAM path — bypass filter/sam2/combine-masks entirely.
+
+    preprocess → droid (no masks, official demo.py args) → viz.
+    Recommended path for endoscope videos: DROID-SLAM does its own keyframe
+    selection internally, so pre-filtering by brightness/specular is not needed.
+    """
+    section("ALL-DROID: preprocess → droid → viz  (direct, no filter / no sam2)")
+    cmd_preprocess(args)
+    args.use_masks = False  # ensure official demo.py compatibility (no --mask_dir)
+    cmd_droid(args)
+    cmd_viz(args)
+
+
 # ----------------------------------------------------------------------------
 # Argument parser
 # ----------------------------------------------------------------------------
@@ -179,6 +213,21 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--width", type=int, default=1280, help="target frame width (default 1280)")
     s.add_argument("--force", action="store_true", help="re-extract even if frames exist")
     s.set_defaults(func=cmd_extract)
+
+    s = sub.add_parser("preprocess", parents=[common],
+                       help="Combined extract + FOV crop + distortion trim + calib.txt (DROID-SLAM ready)")
+    s.add_argument("--video", required=True, help="path to source video")
+    s.add_argument("--width", type=int, default=1280, help="target frame width (default 1280)")
+    s.add_argument("--fps", type=float, default=15.0,
+                   help="target fps after ffmpeg fps filter (default 15; use 0 to keep source fps)")
+    s.add_argument("--distortion-margin", type=float, default=0.15,
+                   help="shrink FOV radius by this fraction (default 0.15)")
+    s.add_argument("--assumed-fov-deg", type=float, default=90.0,
+                   help="assumed horizontal FOV of the full circular view (used only for rough calib)")
+    s.add_argument("--fov-threshold", type=int, default=12,
+                   help="pixel intensity threshold for FOV detection")
+    s.add_argument("--keep-raw", action="store_true", help="keep intermediate raw_frames/ folder")
+    s.set_defaults(func=cmd_preprocess)
 
     s = sub.add_parser("fovmask", parents=[common], help="Stage 2: circular FOV mask from first frame")
     s.set_defaults(func=cmd_fovmask)
@@ -211,8 +260,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--droid-root", default=None, help="DROID-SLAM repo path (or $DROID_SLAM_ROOT)")
     s.add_argument("--weights", default=None, help="droid.pth weights path")
     s.add_argument("--stride", type=int, default=1)
-    s.add_argument("--use-masks", action="store_true", default=True,
-                   help="pass --mask_dir to DROID-SLAM (requires fork that supports it)")
+    # Official DROID-SLAM demo.py does NOT accept --mask_dir. Default is off for
+    # full compatibility; only enable if you point --droid-root at a fork.
+    s.add_argument("--use-masks", action="store_true", default=False,
+                   help="pass --mask_dir to DROID-SLAM (requires a fork that supports it; off by default)")
     s.add_argument("--no-masks", dest="use_masks", action="store_false")
     s.set_defaults(func=cmd_droid)
 
@@ -238,10 +289,25 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--droid-root", default=None)
     s.add_argument("--weights", default=None)
     s.add_argument("--stride", type=int, default=1)
-    s.add_argument("--use-masks", action="store_true", default=True)
+    s.add_argument("--use-masks", action="store_true", default=False)
     s.add_argument("--no-masks", dest="use_masks", action="store_false")
     s.add_argument("--no-show", action="store_true", default=True)
     s.set_defaults(func=cmd_all_cuda)
+
+    s = sub.add_parser("all-droid", parents=[common],
+                       help="Direct DROID-SLAM path: preprocess → droid → viz (skip filter/sam2)")
+    s.add_argument("--video", required=True, help="path to source video")
+    s.add_argument("--width", type=int, default=1280)
+    s.add_argument("--fps", type=float, default=15.0)
+    s.add_argument("--distortion-margin", type=float, default=0.15)
+    s.add_argument("--assumed-fov-deg", type=float, default=90.0)
+    s.add_argument("--fov-threshold", type=int, default=12)
+    s.add_argument("--keep-raw", action="store_true")
+    s.add_argument("--droid-root", default=None, help="DROID-SLAM repo path (or $DROID_SLAM_ROOT)")
+    s.add_argument("--weights", default=None, help="droid.pth path (default: $DROID_SLAM_ROOT/droid.pth)")
+    s.add_argument("--stride", type=int, default=1)
+    s.add_argument("--no-show", action="store_true", default=True)
+    s.set_defaults(func=cmd_all_droid)
 
     return P
 

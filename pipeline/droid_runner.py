@@ -3,16 +3,19 @@
 DROID-SLAM is not pip-installable. It must be cloned and built separately,
 then this module invokes its demo.py via subprocess.
 
-Setup (on Windows + RTX 3080):
+Setup (Ubuntu + RTX 3090):
   1) git clone https://github.com/princeton-vl/DROID-SLAM
   2) cd DROID-SLAM
   3) Create conda env per their README (PyTorch + CUDA matching driver)
   4) python setup.py install
-  5) Download droid.pth to DROID-SLAM/
+  5) Download droid.pth to DROID-SLAM/  (see their tools/download_model.sh)
   6) export DROID_SLAM_ROOT=/path/to/DROID-SLAM
 
-Then this script will call:
-    python $DROID_SLAM_ROOT/demo.py --imagedir <frames> --calib <calib.txt> ...
+This module calls the official demo.py with args that are 100% compatible
+with upstream: --imagedir, --calib, --weights, --stride, --reconstruction_path.
+The optional --mask_dir arg is NOT supported by the official demo.py; it is
+only passed when you explicitly opt in with --use-masks and point --droid-root
+at a fork that adds that flag.
 """
 
 from __future__ import annotations
@@ -37,10 +40,9 @@ def run(frames_dir: Path, calib_txt: Path, out_dir: Path,
     droid_root = droid_root or os.environ.get("DROID_SLAM_ROOT")
     if not droid_root or not Path(droid_root).exists():
         log(STAGE, "DROID_SLAM_ROOT not set or not found", level="err")
-        log(STAGE, "  on Windows+CUDA:")
         log(STAGE, "  git clone https://github.com/princeton-vl/DROID-SLAM")
         log(STAGE, "  cd DROID-SLAM && python setup.py install")
-        log(STAGE, "  set DROID_SLAM_ROOT=C:\\path\\to\\DROID-SLAM")
+        log(STAGE, "  export DROID_SLAM_ROOT=/path/to/DROID-SLAM")
         raise SystemExit(2)
 
     droid_root = Path(droid_root)
@@ -67,8 +69,9 @@ def run(frames_dir: Path, calib_txt: Path, out_dir: Path,
     if masks_dir is not None and Path(masks_dir).exists():
         cmd += ["--mask_dir", str(masks_dir)]
         log(STAGE, f"using masks from {masks_dir}")
-        log(STAGE, "NOTE: official DROID-SLAM demo.py may not accept --mask_dir;")
-        log(STAGE, "      if it errors, use a forked version or pre-bake masks into frames", level="warn")
+        log(STAGE, "WARNING: official DROID-SLAM demo.py does NOT accept --mask_dir.", level="warn")
+        log(STAGE, "         This will fail unless --droid-root points at a fork with mask support.", level="warn")
+        log(STAGE, "         For the standard path, run with --no-masks (default).", level="warn")
     if extra_args:
         cmd += extra_args
 

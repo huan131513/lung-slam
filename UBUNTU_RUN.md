@@ -74,16 +74,20 @@ Should print Python / CUDA / ffmpeg / OpenCV versions with no errors.
 
 ## 4. Prepare the test clip
 
-Put the source video into `data/`:
+The 10-second sample clip is committed to the repo at
+[`data/7348331-618-628.mp4`](data/7348331-618-628.mp4) (~10 MB, 1920×1080 @ 60 fps).
+After `git pull` in Step 1, it is already on disk — nothing else to download.
+
+Verify:
 ```bash
-mkdir -p data
-# scp from Mac, or however you transfer:
-scp your_mac:~/Downloads/7348331-618-628.mp4 ~/path_navigate/data/
+cd ~/path_navigate
+ls -lh data/7348331-618-628.mp4
+ffprobe -v error -show_entries stream=width,height,r_frame_rate,duration \
+        data/7348331-618-628.mp4
 ```
 
 Cut out the 5-10s subclip (which has the largest camera motion of the source):
 ```bash
-cd ~/path_navigate
 ffmpeg -y -ss 5 -t 5 \
     -i data/7348331-618-628.mp4 \
     -c copy data/clip_5to10.mp4
@@ -95,6 +99,11 @@ ffmpeg -y -ss 0 -t 5 \
     -i data/7348331-618-628.mp4 \
     -c copy data/clip_0to5.mp4
 ```
+
+> **If you want to use your own video instead**, drop it into `data/` (any
+> filename) and adjust the paths in Sections 5-8 accordingly. Other `.mp4`
+> files remain gitignored — only `7348331-618-628.mp4` has an explicit
+> exception in `.gitignore`.
 
 ---
 

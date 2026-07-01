@@ -8,6 +8,9 @@ out.zip
 *.mp4
 *.avi
 
+# Exception: sample clip used by UBUNTU_RUN.md
+!data/7348331-618-628.mp4
+
 # Model weights (download separately on Linux)
 *.pth
 *.pt

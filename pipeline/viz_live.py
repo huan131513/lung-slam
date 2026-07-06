@@ -116,11 +116,26 @@ def run(droid_dir: Path, frames_dir: Path | None = None, droid_root: str | None 
         "cam_actors": [], "pt_actors": [],
         "filter_thresh": filter_thresh,
         "frame_points": None, "frame_colors": None,
-        # set once on the very first frame-0 reveal and never reset by
-        # restart()/refilter, so R and S/A don't clobber a view the user
-        # rotated to by hand — only the initial window-open view is forced.
+        # set once, the first time ANY geometry has been added to the
+        # (until-then empty) scene, and never reset by restart()/refilter —
+        # so R / S / A don't clobber a view the user rotated to by hand.
         "view_initialized": False,
     }
+
+    def initial_endoscope_extrinsic():
+        # Frame 0's own rotation (world frame ~= frame 0 for DROID-SLAM, but
+        # use the real rotation rather than assume identity) — same
+        # convention already validated in viz_sync.py — points the camera
+        # to match the source video's left/right/up/down. Back the
+        # viewpoint off from frame 0 along its own -Z so the whole
+        # trajectory (not just frame 0) fits in view.
+        R0 = cams_c2w[0][:3, :3]
+        view_dist = max(traj_radius * 2.5, 0.3)
+        cam_pos = traj_center - R0[:, 2] * view_dist
+        extrinsic = np.eye(4)
+        extrinsic[:3, :3] = R0.T
+        extrinsic[:3, 3] = -R0.T @ cam_pos
+        return extrinsic
 
     def recompute_mask():
         with torch.no_grad():
@@ -168,9 +183,25 @@ def run(droid_dir: Path, frames_dir: Path | None = None, droid_root: str | None 
         state["last_t"] = now
 
         i = state["ix"]
+
+        # add_geometry() resets Open3D's own camera on every single call
+        # (leaving reset_bounding_box at its default). Letting that happen
+        # and then restoring the view straight after — every tick, not just
+        # once — is DROID-SLAM's own droid_visualization() technique ("hack
+        # to allow interacting with visualization during inference"). Doing
+        # it only once, up front, and passing reset_bounding_box=False for
+        # every later add looked fine in quick tests but silently degraded
+        # over a real ~20s default-speed playback (clip planes/zoom drift
+        # until the point cloud stopped rendering) — because Open3D never
+        # got to refit anything to the actual (growing) scene extent again.
+        if state["view_initialized"]:
+            cam_params = vis.get_view_control().convert_to_pinhole_camera_parameters()
+        else:
+            cam_params = None
+
         cam = _camera_actor(o3d, cam_scale)
         cam.transform(cams_c2w[i])
-        vis.add_geometry(cam, reset_bounding_box=False)
+        vis.add_geometry(cam)
         state["cam_actors"].append(cam)
 
         pts, cols = state["frame_points"][i], state["frame_colors"][i]
@@ -178,33 +209,18 @@ def run(droid_dir: Path, frames_dir: Path | None = None, droid_root: str | None 
             pc = o3d.geometry.PointCloud()
             pc.points = o3d.utility.Vector3dVector(pts)
             pc.colors = o3d.utility.Vector3dVector(cols)
-            first_ever = i == 0 and not state["view_initialized"]
-            vis.add_geometry(pc, reset_bounding_box=first_ever)
+            vis.add_geometry(pc)
             state["pt_actors"].append(pc)
-            if first_ever:
-                # add_geometry(reset_bounding_box=True) snaps Open3D's own
-                # default front/up, which has no relation to the endoscope's
-                # own orientation. Re-point the camera to match the source
-                # video's left/right/up/down, using frame 0's own rotation
-                # (world frame ~= frame 0 for DROID-SLAM, but use the real
-                # rotation rather than assume identity) — same convention
-                # already validated in viz_sync.py. Back the viewpoint off
-                # from frame 0 along its own -Z so the whole trajectory (not
-                # just frame 0) fits in view, instead of looking through the
-                # lens from frame 0's exact position.
-                # Only done once (guarded by view_initialized): later R /
-                # S / A restarts must not clobber a view the user rotated to.
-                R0 = cams_c2w[0][:3, :3]
-                view_dist = max(traj_radius * 2.5, 0.3)
-                cam_pos = traj_center - R0[:, 2] * view_dist
 
-                params = vis.get_view_control().convert_to_pinhole_camera_parameters()
-                extrinsic = np.eye(4)
-                extrinsic[:3, :3] = R0.T
-                extrinsic[:3, 3] = -R0.T @ cam_pos
-                params.extrinsic = extrinsic
-                vis.get_view_control().convert_from_pinhole_camera_parameters(params, True)
-                state["view_initialized"] = True
+        if cam_params is None:
+            # Nothing meaningful to restore yet (first-ever geometry) — use
+            # our own endoscope-aligned view instead. Only happens once:
+            # from here on cam_params always reflects whatever the user
+            # last rotated to, so R / S / A restarts don't clobber it.
+            cam_params = vis.get_view_control().convert_to_pinhole_camera_parameters()
+            cam_params.extrinsic = initial_endoscope_extrinsic()
+            state["view_initialized"] = True
+        vis.get_view_control().convert_from_pinhole_camera_parameters(cam_params, True)
 
         if show_frames:
             fi = max(0, min(int(tstamps[i]), len(frame_files) - 1))

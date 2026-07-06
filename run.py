@@ -147,6 +147,8 @@ def cmd_droid(args):
         droid_root=args.droid_root,
         weights=args.weights,
         stride=args.stride,
+        filter_thresh=getattr(args, "filter_thresh", None),
+        keyframe_thresh=getattr(args, "keyframe_thresh", None),
     )
 
 
@@ -279,6 +281,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--droid-root", default=None, help="DROID-SLAM repo path (or $DROID_SLAM_ROOT)")
     s.add_argument("--weights", default=None, help="droid.pth weights path")
     s.add_argument("--stride", type=int, default=1)
+    s.add_argument("--filter-thresh", type=float, default=None,
+                   help="motion threshold to even consider a frame for tracking (demo.py default 2.4; "
+                        "lower keeps more candidate frames)")
+    s.add_argument("--keyframe-thresh", type=float, default=None,
+                   help="motion threshold to keep a tracked frame as a permanent keyframe "
+                        "(demo.py default 4.0; lower keeps more keyframes)")
     # Official DROID-SLAM demo.py does NOT accept --mask_dir. Default is off for
     # full compatibility; only enable if you point --droid-root at a fork.
     s.add_argument("--use-masks", action="store_true", default=False,

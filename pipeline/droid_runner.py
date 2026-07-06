@@ -38,6 +38,8 @@ def run(frames_dir: Path, calib_txt: Path, out_dir: Path,
         droid_root: str | None = None,
         weights: str | None = None,
         stride: int = 1,
+        filter_thresh: float | None = None,
+        keyframe_thresh: float | None = None,
         extra_args: list[str] | None = None) -> None:
     out_dir = ensure_dir(out_dir)
     droid_root = droid_root or os.environ.get("DROID_SLAM_ROOT")
@@ -74,6 +76,14 @@ def run(frames_dir: Path, calib_txt: Path, out_dir: Path,
         "--stride", str(stride),
         "--reconstruction_path", str(reconstruction_pth.resolve()),
     ]
+    if filter_thresh is not None:
+        # gates whether an incoming frame is even considered for tracking
+        # (demo.py default 2.4) — lower keeps more candidate frames
+        cmd += ["--filter_thresh", str(filter_thresh)]
+    if keyframe_thresh is not None:
+        # gates whether a tracked frame is kept as a permanent keyframe
+        # (demo.py default 4.0) — lower keeps more keyframes
+        cmd += ["--keyframe_thresh", str(keyframe_thresh)]
     if masks_dir is not None and Path(masks_dir).exists():
         cmd += ["--mask_dir", str(Path(masks_dir).resolve())]
         log(STAGE, f"using masks from {masks_dir}")

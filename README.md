@@ -1,11 +1,55 @@
 # lung-slam
-
-打開互動檢視器的指令：
+0. 每次開新 terminal 都要先做
 
 source ~/miniconda3/etc/profile.d/conda.sh && conda activate droidenv
 export DROID_SLAM_ROOT=$HOME/DROID-SLAM
 cd ~/lung-slam
-python run.py viz-sync --out ./out/<你的輸出資料夾>
+
+1. 放檔案 + 決定資料夾命名
+
+把影片放到 data/，--out 用一個跟影片對應的獨立名稱（每支影片一個資料夾，不要共用）：
+
+cp /path/to/your_video.mov ~/lung-slam/data/
+
+2. preprocess（擷取影格 + FOV 裁切 + 自動產生 calib.txt）
+
+python run.py preprocess \
+  --video data/your_video.mov \
+  --out ./out/your_video \
+  --fps 15
+
+會產生 out/your_video/{frames/, calib.txt, preview.png, metadata.json}。
+
+常用可調參數：
+- --fps：擷取後的影格率，預設 15（設 0 = 保留原始 fps，通常太密不必要）
+- --width：縮圖寬度，預設 1280
+- --distortion-margin：內視鏡圓形視野邊緣再往內縮的比例，預設 0.15（邊緣扭曲嚴重可加大）
+- --assumed-fov-deg：假設的水平視角，預設 90，這個直接影響 calib.txt 的準確度
+
+檢查 preview.png：確認裁切後的圓形視野有正確蓋住有效畫面、沒有黑邊殘留，這步沒做好會直接拖累 DROID-SLAM 的追蹤品質。
+
+關於 calib.txt 的準確度：這是用「假設的視角角度」+ 偵測到的圓形半徑換算出來的粗略估計值（metadata.json 裡也會註記 "calib.txt is a rough estimate"）。如果你手上有內視鏡廠商提供的真實內參（fx fy cx cy），直接覆寫 out/your_video/calib.txt（格式是一行 fx fy cx cy）取代這個估計值，重建的尺度/準確度會更好。
+
+3. droid（跑 DROID-SLAM）
+
+python run.py droid --out ./out/your_video
+
+跑的過程中會自動跳出「Droid Visualizer」視窗（官方即時預覽，跑完自動關），不用靠它判斷品質好壞，等終端機印出 outputs: ... 才算真正跑完。
+
+如果影片動作幅度小、keyframe 太少（可以先跑一次看 viz-live log 印出的 keyframe 數），可以調低這兩個門檻拿到更多 keyframe：
+python run.py droid --out ./out/your_video --filter-thresh 1.5 --keyframe-thresh 3.0
+
+4. viz-live（檢查最終結果）
+
+python run.py viz-live --out ./out/your_video
+- 拖曳滑鼠旋轉、滾輪縮放
+- P 暫停/繼續、R 重播、S/A 放寬/收緊濾波
+- 如果畫面看起來像「多片 2D 貼片脫節」，通常代表深度尺度不穩定，先試試 --filter-count 4：
+python run.py viz-live --out ./out/your_video --filter-count 4
+
+一行懶人版（等同 preprocess+droid+viz 三步，仍建議跑完後另外執行 viz-live）
+
+python run.py all-droid --video data/your_video.mov --out ./out/your_video
 
 
 Endoscopic 3D reconstruction pipeline — recover camera trajectory + sparse 3D

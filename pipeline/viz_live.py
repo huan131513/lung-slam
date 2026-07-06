@@ -174,6 +174,15 @@ def run(droid_dir: Path, frames_dir: Path | None = None, droid_root: str | None 
         restart(vis)
 
     def animation_callback(vis):
+        if show_frames:
+            # Pump the OpenCV window's own event loop on every single tick,
+            # not just while new keyframes are being revealed below —
+            # otherwise, once the animation finishes (or while paused),
+            # this window stops processing X events entirely and the
+            # window manager reports it as "not responding" (it isn't
+            # actually hung, cv2.waitKey() just never got called again).
+            cv2.waitKey(1)
+
         if not state["playing"] or state["ix"] >= n_frames:
             return
         period = 1.0 / max(fps, 0.1)
@@ -228,7 +237,6 @@ def run(droid_dir: Path, frames_dir: Path | None = None, droid_root: str | None 
             if frame_bgr is not None:
                 cv2.setWindowTitle(frame_win, f"{frame_win} — frame {fi:04d}  (keyframe {i + 1}/{n_frames})")
                 cv2.imshow(frame_win, frame_bgr)
-                cv2.waitKey(1)
 
         state["ix"] += 1
         if state["ix"] >= n_frames:

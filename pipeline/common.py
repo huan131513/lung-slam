@@ -186,10 +186,10 @@ def list_frames(frames_dir, exts=(".png", ".jpg")) -> list[Path]:
     return files
 
 
-def run_cmd(cmd: list[str], stage: str = "shell") -> int:
+def run_cmd(cmd: list[str], stage: str = "shell", cwd: str | None = None) -> int:
     """Run a subprocess, stream stdout/stderr, return returncode."""
     log(stage, f"$ {' '.join(cmd)}")
-    proc = subprocess.run(cmd, check=False)
+    proc = subprocess.run(cmd, check=False, cwd=cwd)
     if proc.returncode != 0:
         log(stage, f"command exited with code {proc.returncode}", level="err")
     return proc.returncode

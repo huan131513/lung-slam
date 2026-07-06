@@ -15,6 +15,8 @@ Quick start
   python run.py calib --out ./out
   python run.py droid --out ./out                                          # Windows + CUDA
   python run.py viz --out ./out
+  python run.py viz-sync --out ./out                                       # interactive, ←→ to step
+  python run.py viz-live --out ./out                                       # Open3D animated replay (official style)
 
 Convenience
 -----------
@@ -28,7 +30,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from pipeline import calib, droid_runner, extract, masks, preprocess, sam2_runner, viz
+from pipeline import calib, droid_runner, extract, masks, preprocess, sam2_runner, viz, viz_live, viz_sync
 from pipeline.common import bold, cyan, log, probe_env, section
 
 
@@ -154,6 +156,23 @@ def cmd_viz(args):
     viz.run(p["droid"], p["viz"], show=not args.no_show)
 
 
+def cmd_viz_sync(args):
+    section("Stage 9 — Synchronized video + trajectory viewer")
+    p = paths(args.out)
+    viz_sync.run(p["frames"], p["droid"], fps=args.fps)
+
+
+def cmd_viz_live(args):
+    section("Stage 9b — Open3D live-animated reconstruction replay")
+    p = paths(args.out)
+    viz_live.run(
+        p["droid"], frames_dir=None if args.no_frames else p["frames"],
+        droid_root=args.droid_root, fps=args.fps,
+        filter_thresh=args.filter_thresh, filter_count=args.filter_count,
+        cam_scale=args.cam_scale,
+    )
+
+
 # Convenience compounds
 def cmd_all_mac(args):
     """Run all Mac-friendly stages in sequence."""
@@ -270,6 +289,22 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("viz", parents=[common], help="Stage 8: visualize trajectory + sparse points")
     s.add_argument("--no-show", action="store_true", help="do not open Open3D viewer")
     s.set_defaults(func=cmd_viz)
+
+    s = sub.add_parser("viz-sync", parents=[common],
+                        help="Stage 9: synchronized video + 3D trajectory viewer (←→ to step)")
+    s.add_argument("--fps", type=float, default=5.0, help="auto-play speed (keyframes/sec)")
+    s.set_defaults(func=cmd_viz_sync)
+
+    s = sub.add_parser("viz-live", parents=[common],
+                        help="Stage 9b: Open3D live-animated replay (growing point cloud + moving camera, official style)")
+    s.add_argument("--droid-root", default=None, help="DROID-SLAM repo path (or $DROID_SLAM_ROOT)")
+    s.add_argument("--fps", type=float, default=6.0, help="keyframe reveal rate (keyframes/sec)")
+    s.add_argument("--filter-thresh", type=float, default=0.005, help="depth-consistency filter threshold")
+    s.add_argument("--filter-count", type=int, default=2, help="min agreeing views to keep a point")
+    s.add_argument("--cam-scale", type=float, default=0.05, help="camera frustum wireframe size")
+    s.add_argument("--no-frames", action="store_true",
+                   help="don't open the synchronized real-frame window")
+    s.set_defaults(func=cmd_viz_live)
 
     s = sub.add_parser("all-mac", parents=[common], help="Run all Mac-friendly stages (extract → calib)")
     s.add_argument("--video", required=True)

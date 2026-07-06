@@ -3,14 +3,17 @@
 Step-by-step instructions to reproduce a single-clip trajectory reconstruction
 on Ubuntu + RTX 3090, using the direct path (no filter, no SAM 2, no `--mask_dir`).
 
-Verified on: Ubuntu 22.04, CUDA 11.8+, PyTorch 1.10+.
+Verified on: Ubuntu 20.04, NVIDIA driver 550 (CUDA 11.6 system `nvcc`),
+PyTorch 1.13.1+cu116, Python 3.10.
 
 ---
 
 ## 0. Assumptions
 
-- You already have the repo cloned at `~/path_navigate` (or clone it now).
-- You have Conda / Miniconda installed.
+- You already have the repo cloned at `~/lung-slam` (or clone it now).
+- You have Conda / Miniconda installed (used here only to get a Python ≥3.9
+  interpreter — system Python 3.8 on Ubuntu 20.04 is too old for current
+  PyTorch wheels — everything else is installed with plain `pip`).
 - You have an NVIDIA driver + CUDA runtime installed on the host.
 - Your video file is somewhere on the host filesystem.
 
@@ -19,7 +22,7 @@ Verified on: Ubuntu 22.04, CUDA 11.8+, PyTorch 1.10+.
 ## 1. Pull latest code
 
 ```bash
-cd ~/path_navigate
+cd ~/lung-slam
 git pull origin main
 ```
 
@@ -34,14 +37,62 @@ Expected: both files exist and `preprocess` + `all-droid` appear in the CLI help
 
 ## 2. Install DROID-SLAM (once per machine)
 
+> **Do not use DROID-SLAM's `environment.yaml` / `conda env create`.** That
+> path is now marked deprecated upstream, and on this kind of multi-channel
+> old spec (`rusty1s`, `open3d-admin`) conda's solver can run for 20+ minutes
+> and then get OOM-killed by the kernel without a clear error — it happened
+> twice while writing this doc. Upstream's current README instead recommends
+> plain `pip` into a venv (tested by them up to torch 2.7); we use a minimal
+> conda env only to get Python 3.10, then do everything else with `pip`.
+
 ```bash
 cd ~
 git clone --recursive https://github.com/princeton-vl/DROID-SLAM.git
 cd DROID-SLAM
-conda env create -f environment.yaml
+
+conda create -n droidenv python=3.10 -y
 conda activate droidenv
-python setup.py install
-./tools/download_model.sh          # downloads droid.pth (~250 MB) into repo root
+```
+
+**Pick a PyTorch build whose CUDA *major* version matches your system's
+`nvcc --version`** (check with `nvcc --version` and `nvidia-smi`) — building
+the CUDA extensions below fails if they mismatch. Example for system CUDA 11.6:
+
+```bash
+pip install torch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 \
+    --index-url https://download.pytorch.org/whl/cu116
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+# must print "1.13.1+cu116 True" — if False, the wheel's CUDA build is too
+# new/old for your driver (check https://pytorch.org for other cuXXX tags)
+```
+
+Now the rest of DROID-SLAM's own install steps, plus two fixes this repo needed:
+
+```bash
+pip install -r requirements.txt
+pip install moderngl moderngl-window   # demo.py imports this unconditionally now
+
+# thirdparty/lietorch builds fine against the torch just installed:
+pip install --no-build-isolation thirdparty/lietorch
+
+# thirdparty/pytorch_scatter's bundled source uses C++17 (std::optional) but
+# this repo's build flags are C++14 -> compile error. Use a prebuilt wheel
+# matching your torch/cuda tag instead (find yours at data.pyg.org/whl):
+pip install torch-scatter==2.1.1+pt113cu116 \
+    -f https://data.pyg.org/whl/torch-1.13.1+cu116.html
+
+# torch==1.13 was built against numpy 1.x; newer numpy/opencv break the
+# lietorch/torch_scatter C extensions with an "_ARRAY_API not found" warning
+# (and can hard-crash) — pin both down:
+pip install "numpy<2" "opencv-python<4.10"
+
+python setup.py install                # builds droid_backends, ~1-3 min
+gdown 1PpqVt1H4maBa_GbPJp4NwxRsd9jk-elh # downloads droid.pth into repo root
+```
+
+Sanity check the extensions actually built:
+```bash
+python -c "import torch, lietorch, torch_scatter, droid_backends; print('ok')"
 ```
 
 Export the path so this repo's runner can find it:
@@ -56,10 +107,10 @@ ls $DROID_SLAM_ROOT/droid.pth       # weight must exist
 
 ## 3. Install this repo's Python deps
 
-Inside the `droidenv` conda env (or a separate env — either works):
+Inside the same `droidenv` conda env:
 
 ```bash
-cd ~/path_navigate
+cd ~/lung-slam
 pip install -r requirements.txt
 sudo apt-get install -y ffmpeg      # if not already present
 ```
@@ -68,7 +119,9 @@ Sanity check:
 ```bash
 python run.py check
 ```
-Should print Python / CUDA / ffmpeg / OpenCV versions with no errors.
+Should print Python / CUDA / ffmpeg / OpenCV versions with no errors. A
+`sam2 NOT installed` warning is expected and fine for this direct path —
+SAM 2 is only needed for the advanced Path B (tool masking).
 
 ---
 
@@ -80,7 +133,7 @@ After `git pull` in Step 1, it is already on disk — nothing else to download.
 
 Verify:
 ```bash
-cd ~/path_navigate
+cd ~/lung-slam
 ls -lh data/7348331-618-628.mp4
 ffprobe -v error -show_entries stream=width,height,r_frame_rate,duration \
         data/7348331-618-628.mp4
@@ -144,16 +197,22 @@ Each `out/clip_*/` directory should contain:
 
 ```
 out/clip_5to10/
-├── preview.png       # crop overlay (yellow=raw FOV, red=trimmed, green=final crop)
-├── calib.txt         # "fx fy cx cy"
-├── frames/           # ~20 cropped PNGs (5s × 4fps)
+├── preview.png         # crop overlay (yellow=raw FOV, red=trimmed, green=final crop)
+├── calib.txt           # "fx fy cx cy"
+├── frames/             # ~20 cropped PNGs (5s × 4fps)
 ├── metadata.json
-├── droid/            # DROID-SLAM output
-│   ├── poses.npy     # (N, 7)  camera poses [tx ty tz qx qy qz qw]
-│   ├── disps.npy     # per-keyframe inverse depth
-│   ├── tstamps.npy   # keyframe indices
-│   └── images.npy    # keyframe images
-└── viz/              # trajectory + point cloud visualizations
+├── droid/              # DROID-SLAM output
+│   ├── reconstruction.pth  # raw torch.save bundle written by demo.py
+│   ├── poses.npy           # (N, 7) camera poses [tx ty tz qx qy qz qw],
+│   │                       #   WORLD frame — already inverted from
+│   │                       #   DROID-SLAM's internal world-to-camera storage
+│   ├── disps.npy           # per-keyframe inverse depth
+│   ├── tstamps.npy         # keyframe indices into frames/
+│   ├── images.npy          # keyframe images (as seen by DROID-SLAM)
+│   ├── intrinsics.npy      # per-keyframe camera intrinsics
+│   └── points.ply          # colored world-frame point cloud
+│                           #   (droid_backends.iproj + depth_filter)
+└── viz/                # trajectory.json + trajectory.png (2D projections)
 ```
 
 Sanity checks:
@@ -163,7 +222,8 @@ Sanity checks:
 | Preview crop is correct | open `preview.png` | green box is inside the tissue view, no black border |
 | Number of frames | `ls out/clip_5to10/frames \| wc -l` | ~20 |
 | DROID converged | `python -c "import numpy as np; p=np.load('out/clip_5to10/droid/poses.npy'); print(p.shape)"` | shape starts with a number > 10 |
-| Trajectory shape | open `out/clip_5to10/viz/trajectory.png` (or use Open3D) | should look like a short arc, not a jittery zigzag |
+| Trajectory shape | open `out/clip_5to10/viz/trajectory.png` | should look like a short arc, not a jittery zigzag |
+| Interactive check | `python run.py viz-sync --out ./out/clip_5to10` | video frame + point cloud + camera frustums, step with ←→, see [`viz_sync.py`](pipeline/viz_sync.py) |
 
 ---
 
@@ -212,6 +272,29 @@ Downscale further:
 ```bash
 python run.py all-droid ... --width 960
 ```
+
+### `conda env create -f environment.yaml` hangs or the machine grinds to a halt
+Don't use it — see the warning at the top of Section 2. Kill it
+(`pkill -9 -f "conda env create"`) and follow the pip-based steps instead.
+
+### `ModuleNotFoundError: No module named 'droid'` when running the `droid` stage
+`demo.py` does `sys.path.append('droid_slam')` (a relative path) and must be
+run with `DROID_SLAM_ROOT` as its working directory. This repo's
+`pipeline/droid_runner.py` already sets `cwd` correctly — if you see this,
+you're likely on a stale checkout; `git pull`.
+
+### `ModuleNotFoundError: No module named 'moderngl'`
+```bash
+pip install moderngl moderngl-window
+```
+
+### `error: 'std::optional' has not been declared` while building `pytorch_scatter`
+Don't build it from `thirdparty/pytorch_scatter` — install the prebuilt wheel
+instead (see Section 2): `pip install torch-scatter==<ver>+pt<torch>cu<cuda> -f https://data.pyg.org/whl/torch-<ver>+cu<cuda>.html`.
+
+### `UserWarning: Failed to initialize NumPy: _ARRAY_API not found`
+`torch`/`lietorch` here were built against NumPy 1.x. Run
+`pip install "numpy<2" "opencv-python<4.10"`.
 
 ---
 

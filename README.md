@@ -1,5 +1,13 @@
 # lung-slam
 
+打開互動檢視器的指令：
+
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate droidenv
+export DROID_SLAM_ROOT=$HOME/DROID-SLAM
+cd ~/lung-slam
+python run.py viz-sync --out ./out/<你的輸出資料夾>
+
+
 Endoscopic 3D reconstruction pipeline — recover camera trajectory + sparse 3D
 points from monocular thoracoscopic video.
 

@@ -25,6 +25,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
+import torch
+
 from .common import ensure_dir, log, run_cmd, timed
 
 STAGE = "droid"
@@ -57,17 +60,22 @@ def run(frames_dir: Path, calib_txt: Path, out_dir: Path,
         log(STAGE, f"weights file {weights} not found — download from DROID-SLAM README", level="err")
         raise SystemExit(2)
 
-    # Build command
+    # current upstream demo.py torch.saves a single dict to --reconstruction_path
+    # (must be a file, not a directory) — split it into per-array .npy files below.
+    reconstruction_pth = out_dir / "reconstruction.pth"
+
+    # demo.py does `sys.path.append('droid_slam')` (relative) and must be run
+    # with droid_root as cwd, so all path args are made absolute here.
     cmd = [
-        sys.executable, str(demo),
-        "--imagedir", str(frames_dir),
-        "--calib", str(calib_txt),
-        "--weights", weights,
+        sys.executable, str(demo.resolve()),
+        "--imagedir", str(frames_dir.resolve()),
+        "--calib", str(calib_txt.resolve()),
+        "--weights", str(Path(weights).resolve()),
         "--stride", str(stride),
-        "--reconstruction_path", str(out_dir),
+        "--reconstruction_path", str(reconstruction_pth.resolve()),
     ]
     if masks_dir is not None and Path(masks_dir).exists():
-        cmd += ["--mask_dir", str(masks_dir)]
+        cmd += ["--mask_dir", str(Path(masks_dir).resolve())]
         log(STAGE, f"using masks from {masks_dir}")
         log(STAGE, "WARNING: official DROID-SLAM demo.py does NOT accept --mask_dir.", level="warn")
         log(STAGE, "         This will fail unless --droid-root points at a fork with mask support.", level="warn")
@@ -77,9 +85,64 @@ def run(frames_dir: Path, calib_txt: Path, out_dir: Path,
 
     log(STAGE, f"DROID_SLAM_ROOT = {droid_root}")
     with timed(STAGE, "Running DROID-SLAM"):
-        rc = run_cmd(cmd, stage=STAGE)
+        rc = run_cmd(cmd, stage=STAGE, cwd=str(droid_root))
         if rc != 0:
             raise RuntimeError(f"DROID-SLAM exited with code {rc}")
 
-    log(STAGE, f"outputs (if successful): {out_dir}", level="ok")
-    log(STAGE, "  expected: poses.npy, disps.npy, tstamps.npy, images.npy")
+    # unpack the single torch.save bundle into the per-array .npy files the
+    # rest of this pipeline (viz stage) expects.
+    bundle = torch.load(reconstruction_pth, map_location="cpu")
+
+    # bundle["poses"] is DROID-SLAM's internal world-to-camera SE3 buffer, NOT
+    # the camera position in world space. Droid.terminate() (the documented
+    # public API) and DROID-SLAM's own visualizer/view_reconstruction.py both
+    # invert it before use — do the same so poses.npy's translation column is
+    # the actual camera position (otherwise the plotted trajectory is wrong).
+    from lietorch import SE3
+    poses_c2w = SE3(bundle["poses"]).inv().data.numpy()
+    np.save(out_dir / "poses.npy", poses_c2w)
+    for key in ("tstamps", "images", "disps", "intrinsics"):
+        np.save(out_dir / f"{key}.npy", bundle[key].numpy())
+
+    try:
+        _save_point_cloud(bundle, out_dir / "points.ply")
+    except Exception as e:
+        log(STAGE, f"point cloud export skipped: {e}", level="warn")
+
+    log(STAGE, f"outputs: {out_dir}", level="ok")
+    log(STAGE, "  wrote: poses.npy, disps.npy, tstamps.npy, images.npy, intrinsics.npy, points.ply")
+
+
+def _save_point_cloud(bundle: dict, ply_path: Path,
+                       filter_thresh: float = 0.005, filter_count: int = 2) -> None:
+    """Back-project keyframe depth maps into a colored world-frame point cloud.
+
+    Same math as DROID-SLAM's own view_reconstruction.py: droid_backends.iproj
+    unprojects each pixel using its inverse depth + pose, depth_filter keeps
+    only points with consistent depth across >= filter_count other views.
+    """
+    import droid_backends
+    import open3d as o3d
+    from lietorch import SE3
+
+    images = bundle["images"].cuda()[..., ::2, ::2]
+    disps = bundle["disps"].cuda()[..., ::2, ::2].contiguous()
+    poses = bundle["poses"].cuda()
+    intrinsics = 4 * bundle["intrinsics"].cuda()
+
+    index = torch.arange(len(images), device="cuda")
+    thresh = filter_thresh * torch.ones_like(disps.mean(dim=[1, 2]))
+
+    points = droid_backends.iproj(SE3(poses).inv().data, disps, intrinsics[0])
+    colors = images[:, [2, 1, 0]].permute(0, 2, 3, 1) / 255.0
+    counts = droid_backends.depth_filter(poses, disps, intrinsics[0], index, thresh)
+
+    mask = (counts >= filter_count) & (disps > 0.25 * disps.mean())
+    points_np = points[mask].cpu().numpy()
+    colors_np = colors[mask].cpu().numpy()
+
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points_np)
+    pcd.colors = o3d.utility.Vector3dVector(colors_np)
+    o3d.io.write_point_cloud(str(ply_path), pcd)
+    log(STAGE, f"points.ply -> {ply_path}  ({len(points_np)} pts)", level="ok")

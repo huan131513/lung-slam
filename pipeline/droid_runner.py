@@ -40,6 +40,7 @@ def run(frames_dir: Path, calib_txt: Path, out_dir: Path,
         stride: int = 1,
         filter_thresh: float | None = None,
         keyframe_thresh: float | None = None,
+        disable_vis: bool = True,
         extra_args: list[str] | None = None) -> None:
     out_dir = ensure_dir(out_dir)
     droid_root = droid_root or os.environ.get("DROID_SLAM_ROOT")
@@ -84,6 +85,14 @@ def run(frames_dir: Path, calib_txt: Path, out_dir: Path,
         # gates whether a tracked frame is kept as a permanent keyframe
         # (demo.py default 4.0) — lower keeps more keyframes
         cmd += ["--keyframe_thresh", str(keyframe_thresh)]
+    if disable_vis:
+        # demo.py's own live moderngl preview window runs as a non-daemon
+        # subprocess that Droid.terminate() never actually stops (despite its
+        # docstring) -- Python waits for it to be closed by hand before the
+        # process can exit, hanging the shell after the real computation is
+        # already done. Suppressing it also avoids confusing its different
+        # (hardcoded 0.02) filter threshold with this pipeline's own viz-live.
+        cmd += ["--disable_vis"]
     if masks_dir is not None and Path(masks_dir).exists():
         cmd += ["--mask_dir", str(Path(masks_dir).resolve())]
         log(STAGE, f"using masks from {masks_dir}")

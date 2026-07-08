@@ -51,6 +51,7 @@ def paths(out: Path) -> dict:
         "final_masks":    out / "final_masks",
         "calib_json":     out / "calib.json",
         "calib_txt":      out / "calib.txt",
+        "frames_prebaked": out / "frames_prebaked",
         "droid":          out / "droid",
         "viz":            out / "viz",
     }
@@ -139,8 +140,15 @@ def cmd_calib(args):
 def cmd_droid(args):
     section("Stage 7 — DROID-SLAM")
     p = paths(args.out)
+    frames_dir = p["frames"]
+    if getattr(args, "use_prebaked", False):
+        if not p["frames_prebaked"].exists():
+            log("droid", f"--use-prebaked given but {p['frames_prebaked']} not found — run prebake first", level="err")
+            raise SystemExit(2)
+        frames_dir = p["frames_prebaked"]
+        log("droid", f"using pre-baked frames: {frames_dir}")
     droid_runner.run(
-        frames_dir=p["frames"],
+        frames_dir=frames_dir,
         calib_txt=p["calib_txt"],
         out_dir=p["droid"],
         masks_dir=p["final_masks"] if args.use_masks else None,
@@ -149,6 +157,7 @@ def cmd_droid(args):
         stride=args.stride,
         filter_thresh=getattr(args, "filter_thresh", None),
         keyframe_thresh=getattr(args, "keyframe_thresh", None),
+        disable_vis=getattr(args, "disable_vis", True),
     )
 
 
@@ -292,6 +301,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--use-masks", action="store_true", default=False,
                    help="pass --mask_dir to DROID-SLAM (requires a fork that supports it; off by default)")
     s.add_argument("--no-masks", dest="use_masks", action="store_false")
+    s.add_argument("--use-prebaked", action="store_true", default=False,
+                   help="use out/frames_prebaked (FOV border / tool region baked out) instead of "
+                        "out/frames as --imagedir; requires frames_prebaked/ to already exist")
+    s.add_argument("--disable-vis", action="store_true", default=True,
+                   help="suppress DROID-SLAM's own live moderngl preview window (default: on — "
+                        "it's a non-daemon subprocess that Droid.terminate() never actually closes, "
+                        "so the shell hangs after computation finishes until the window is closed by hand)")
+    s.add_argument("--show-vis", dest="disable_vis", action="store_false",
+                   help="re-enable DROID-SLAM's live preview window (shell will hang after completion "
+                        "until you close it manually)")
     s.set_defaults(func=cmd_droid)
 
     s = sub.add_parser("viz", parents=[common], help="Stage 8: visualize trajectory + sparse points")

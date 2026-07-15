@@ -150,6 +150,44 @@ def crop_all(raw_dir: Path, out_dir: Path, box: tuple[int, int, int, int]) -> in
     return n
 
 
+DEFAULT_INTRINSICS_PATH = Path(__file__).resolve().parent.parent / "data" / "intrinsics.json"
+
+
+def load_real_intrinsics(path: Path, model: str = "pinhole_4param") -> dict:
+    """Load a checkerboard calibration (see data/intrinsics.json) for one model.
+
+    Returns the calibration's own resolution (W0,H0) plus fx/fy/cx/cy/dist, all
+    still in that resolution's pixel space -- real_calib_line() below rescales
+    to whatever resolution/crop the current run actually uses.
+    """
+    data = json.loads(Path(path).read_text())
+    m = data[model]
+    W0, H0 = m["image_size"]
+    K = m["K"]
+    n_dist = 5 if model == "pinhole_5param" else 4
+    return {
+        "W0": W0, "H0": H0,
+        "fx": K[0][0], "fy": K[1][1], "cx": K[0][2], "cy": K[1][2],
+        "dist": m["dist"][:n_dist],
+    }
+
+
+def real_calib_line(intr: dict, W: int, box: tuple[int, int, int, int]) -> str:
+    """Rescale a loaded calibration (at its own W0xH0) to match the current
+    pipeline's post-ffmpeg-scale width W and FOV crop box (x0,y0,x1,y1) --
+    both in that same scaled (pre-crop) coordinate space.
+
+    fx/fy/cx/cy scale with image size; a translation-only crop just shifts
+    cx/cy by the box origin. Distortion coefficients are scale-invariant
+    (they operate in normalized coordinates) so they carry over unchanged.
+    """
+    s = W / intr["W0"]
+    fx, fy = intr["fx"] * s, intr["fy"] * s
+    cx, cy = intr["cx"] * s - box[0], intr["cy"] * s - box[1]
+    dist_str = " ".join(f"{d:.8f}" for d in intr["dist"])
+    return f"{fx:.4f} {fy:.4f} {cx:.4f} {cy:.4f} {dist_str}\n"
+
+
 def write_calib(out_path: Path, W: int, H: int, r_outer: int, assumed_fov_deg: float) -> None:
     """DROID-SLAM calib.txt line: 'fx fy cx cy'.
 
@@ -188,8 +226,16 @@ def run(video: Path, out_dir: Path,
         distortion_margin: float = 0.15,
         assumed_fov_deg: float = 90.0,
         fov_threshold: int = 12,
-        keep_raw: bool = False) -> None:
-    """End-to-end preprocess. Produces <out_dir>/{frames, calib.txt, preview.png}."""
+        keep_raw: bool = False,
+        intrinsics_path: Path | None = DEFAULT_INTRINSICS_PATH,
+        calib_model: str = "pinhole_4param") -> None:
+    """End-to-end preprocess. Produces <out_dir>/{frames, calib.txt, preview.png}.
+
+    calib.txt uses the real checkerboard calibration (intrinsics_path) rescaled
+    to match this video's actual resolution/crop whenever the source video's
+    native resolution matches the calibration's own (data/intrinsics.json is
+    used by default); otherwise it falls back to the FOV-heuristic estimate.
+    """
     video = Path(video)
     if not video.exists():
         raise FileNotFoundError(video)
@@ -197,6 +243,21 @@ def run(video: Path, out_dir: Path,
     out_dir = ensure_dir(out_dir)
     raw_dir = ensure_dir(out_dir / "raw_frames")
     crop_dir = ensure_dir(out_dir / "frames")
+
+    src_info = probe_video(video)
+    real_intr = None
+    if intrinsics_path and Path(intrinsics_path).exists():
+        try:
+            real_intr = load_real_intrinsics(intrinsics_path, calib_model)
+        except Exception as e:
+            log(STAGE, f"could not load {intrinsics_path}: {e}", level="warn")
+        else:
+            if (int(src_info["width"]), int(src_info["height"])) != (real_intr["W0"], real_intr["H0"]):
+                log(STAGE,
+                    f"source video {int(src_info['width'])}x{int(src_info['height'])} != "
+                    f"calibration {real_intr['W0']}x{real_intr['H0']} -- falling back to "
+                    f"FOV-heuristic calib.txt for this clip", level="warn")
+                real_intr = None
 
     # 1) extract
     with timed(STAGE, "ffmpeg extract"):
@@ -228,7 +289,11 @@ def run(video: Path, out_dir: Path,
         n = crop_all(raw_dir, crop_dir, box)
 
     # 5) calib
-    write_calib(out_dir / "calib.txt", Wc, Hc, r_outer, assumed_fov_deg)
+    if real_intr is not None:
+        (out_dir / "calib.txt").write_text(real_calib_line(real_intr, W, box))
+        log(STAGE, f"calib.txt <- REAL calibration ({calib_model}) from {intrinsics_path}", level="ok")
+    else:
+        write_calib(out_dir / "calib.txt", Wc, Hc, r_outer, assumed_fov_deg)
 
     # metadata
     meta = {
@@ -241,7 +306,10 @@ def run(video: Path, out_dir: Path,
         "fov_radius_inner": r_inner,
         "distortion_margin": distortion_margin,
         "assumed_fov_deg": assumed_fov_deg,
-        "notes": "calib.txt is a rough estimate; replace with real calibration when available.",
+        "calib_source": f"real:{calib_model}:{intrinsics_path}" if real_intr is not None else "heuristic",
+        "notes": ("calib.txt is a rough estimate; replace with real calibration when available."
+                  if real_intr is None else
+                  "calib.txt uses the real checkerboard calibration, rescaled to this crop."),
     }
     (out_dir / "metadata.json").write_text(json.dumps(meta, indent=2))
     log(STAGE, f"metadata -> {out_dir/'metadata.json'}", level="ok")

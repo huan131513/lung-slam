@@ -88,6 +88,8 @@ def cmd_preprocess(args):
         assumed_fov_deg=args.assumed_fov_deg,
         fov_threshold=args.fov_threshold,
         keep_raw=args.keep_raw,
+        intrinsics_path=(None if args.no_real_calib else Path(args.intrinsics)),
+        calib_model=args.calib_model,
     )
 
 
@@ -257,6 +259,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--fov-threshold", type=int, default=12,
                    help="pixel intensity threshold for FOV detection")
     s.add_argument("--keep-raw", action="store_true", help="keep intermediate raw_frames/ folder")
+    s.add_argument("--intrinsics", default=str(preprocess.DEFAULT_INTRINSICS_PATH),
+                   help="real checkerboard calibration JSON (default: data/intrinsics.json); "
+                        "used automatically when the source video's resolution matches it, "
+                        "otherwise falls back to the FOV-heuristic estimate")
+    s.add_argument("--calib-model", choices=["pinhole_4param", "pinhole_5param"], default="pinhole_4param")
+    s.add_argument("--no-real-calib", action="store_true",
+                   help="always use the FOV-heuristic calib.txt, even if a matching calibration exists")
     s.set_defaults(func=cmd_preprocess)
 
     s = sub.add_parser("fovmask", parents=[common], help="Stage 2: circular FOV mask from first frame")

@@ -51,6 +51,21 @@ python run.py viz-live --out ./out/your_video --filter-count 4
 
 python run.py all-droid --video data/your_video.mov --out ./out/your_video
 
+想要擷取子片段
+
+只跑整支影片裡的某一段幀數範圍（例如第 1490～1940 幀），用 split_video.py，不是 run.py preprocess（後者沒有 --start/--end，只能整支處理）：
+
+python split_video.py \
+  --video data/your_video.mp4 \
+  --start 1490 \
+  --end 1940 \
+  --out ./out/your_video_1490-1940
+
+- --start / --end：幀數索引（0-based，含頭含尾）
+- 其他參數（--width、--fps、--distortion-margin、--assumed-fov-deg、--intrinsics、--calib-model、--no-real-calib）跟 preprocess 相同，但 --fps 預設值不同：split_video.py 預設 0（保留原始 fps），preprocess 預設降到 15，想比照平常流程要自己加 --fps 15
+- 輸出格式跟 preprocess 一樣（frames/、calib.txt、preview.png、metadata.json），接著照常跑 3./4. 步驟即可：
+  python run.py droid --out ./out/your_video_1490-1940
+  python run.py viz-live --out ./out/your_video_1490-1940
 
 Endoscopic 3D reconstruction pipeline — recover camera trajectory + sparse 3D
 points from monocular thoracoscopic video.

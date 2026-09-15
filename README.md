@@ -98,6 +98,16 @@ python run.py viz-live --out ./out/your_video --filter-count 4
 python run.py all-droid --video data/your_video.mov --out ./out/your_video
 ```
 
+### 一行懶人版（含爛幀過濾）
+
+跟上面一樣，但先跑 `fovmask`/`filter` 把過曝/高光的幀濾掉，droid 只吃剩下的乾淨幀（見上面「篩選 keyframe」章節的說明——這只控制哪些幀有資格被考慮，不代表全部都會變 keyframe，DROID 自己的動作篩選還是照跑）：
+
+```bash
+python run.py all-clean --video data/your_video.mov --out ./out/your_video
+```
+
+跑完會多出 `out/your_video/{fov_mask.png, frame_metrics.csv, good_frames.txt, frames_good/}`。想調過濾門檻可以加 `--max-brightness`/`--min-brightness`/`--max-specular`（跟單獨跑 `filter` 一樣，預設值也一樣，見 README 警告：目前門檻是抓其他影片調的，這支內視鏡片段常常過濾掉六成以上，先看 `frame_metrics.csv` 再決定要不要調鬆）。
+
 ---
 
 ## Pipeline at a glance

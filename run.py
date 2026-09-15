@@ -46,6 +46,7 @@ def paths(out: Path) -> dict:
         "metadata":       out / "metadata.json",
         "metrics":        out / "frame_metrics.csv",
         "good":           out / "good_frames.txt",
+        "frames_good":    out / "frames_good",
         "prompts":        out / "prompts.json",
         "tool_masks":     out / "tool_masks",
         "final_masks":    out / "final_masks",
@@ -110,6 +111,12 @@ def cmd_filter(args):
     )
 
 
+def cmd_materialize_good(args):
+    section("Stage 3b — Materialize good frames")
+    p = paths(args.out)
+    masks.run_materialize_good(p["frames"], p["good"], p["frames_good"])
+
+
 def cmd_sam2_prompt(args):
     section("Stage 4a — SAM 2 prompt selector")
     p = paths(args.out)
@@ -143,7 +150,13 @@ def cmd_droid(args):
     section("Stage 7 — DROID-SLAM")
     p = paths(args.out)
     frames_dir = p["frames"]
-    if getattr(args, "use_prebaked", False):
+    if getattr(args, "use_filtered", False):
+        if not p["frames_good"].exists():
+            log("droid", f"--use-filtered given but {p['frames_good']} not found — run filter + materialize-good first", level="err")
+            raise SystemExit(2)
+        frames_dir = p["frames_good"]
+        log("droid", f"using filtered good frames: {frames_dir}")
+    elif getattr(args, "use_prebaked", False):
         if not p["frames_prebaked"].exists():
             log("droid", f"--use-prebaked given but {p['frames_prebaked']} not found — run prebake first", level="err")
             raise SystemExit(2)
@@ -221,6 +234,29 @@ def cmd_all_droid(args):
     cmd_viz(args)
 
 
+def cmd_all_clean(args):
+    """One-shot direct path with bad-frame filtering baked in.
+
+    preprocess -> fovmask -> filter -> materialize good frames -> droid -> viz.
+    Drops washed-out / specular-glare frames (Stage 3) before DROID-SLAM ever
+    sees them, by excluding whole files from --imagedir (no --mask_dir fork
+    needed). DROID-SLAM still runs its own motion-based keyframe selection on
+    top of whatever "good" frames remain — this only controls what's eligible,
+    not which of those become keyframes (see --filter-thresh/--keyframe-thresh
+    on the droid stage for that).
+    """
+    section("ALL-CLEAN: preprocess → fovmask → filter → droid (good frames only) → viz")
+    cmd_preprocess(args)
+    cmd_fovmask(args)
+    cmd_filter(args)
+    cmd_materialize_good(args)
+    args.use_masks = False
+    args.use_prebaked = False
+    args.use_filtered = True
+    cmd_droid(args)
+    cmd_viz(args)
+
+
 # ----------------------------------------------------------------------------
 # Argument parser
 # ----------------------------------------------------------------------------
@@ -277,6 +313,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-specular", type=float, default=0.05, help="0.05 = 5%%")
     s.set_defaults(func=cmd_filter)
 
+    s = sub.add_parser("materialize-good", parents=[common],
+                       help="Stage 3b: copy filter's good_frames.txt entries into out/frames_good")
+    s.set_defaults(func=cmd_materialize_good)
+
     s = sub.add_parser("sam2-prompt", parents=[common], help="Stage 4a: interactive prompt picker (matplotlib GUI)")
     s.add_argument("--key-seconds", default="8,12,30,44",
                    help="comma-separated seconds at which to prompt (default: 8,12,30,44)")
@@ -313,6 +353,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--use-prebaked", action="store_true", default=False,
                    help="use out/frames_prebaked (FOV border / tool region baked out) instead of "
                         "out/frames as --imagedir; requires frames_prebaked/ to already exist")
+    s.add_argument("--use-filtered", action="store_true", default=False,
+                   help="use out/frames_good (Stage-3-filtered good frames only) instead of "
+                        "out/frames as --imagedir; requires good_frames.txt + frames_good/ to "
+                        "already exist (run filter + materialize-good first)")
     s.add_argument("--disable-vis", action="store_true", default=True,
                    help="suppress DROID-SLAM's own live moderngl preview window (default: on — "
                         "it's a non-daemon subprocess that Droid.terminate() never actually closes, "
@@ -374,11 +418,41 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--assumed-fov-deg", type=float, default=90.0)
     s.add_argument("--fov-threshold", type=int, default=12)
     s.add_argument("--keep-raw", action="store_true")
+    s.add_argument("--intrinsics", default=str(preprocess.DEFAULT_INTRINSICS_PATH))
+    s.add_argument("--calib-model", choices=["pinhole_4param", "pinhole_5param"], default="pinhole_4param")
+    s.add_argument("--no-real-calib", action="store_true")
     s.add_argument("--droid-root", default=None, help="DROID-SLAM repo path (or $DROID_SLAM_ROOT)")
     s.add_argument("--weights", default=None, help="droid.pth path (default: $DROID_SLAM_ROOT/droid.pth)")
     s.add_argument("--stride", type=int, default=1)
+    s.add_argument("--filter-thresh", type=float, default=None)
+    s.add_argument("--keyframe-thresh", type=float, default=None)
     s.add_argument("--no-show", action="store_true", default=True)
     s.set_defaults(func=cmd_all_droid)
+
+    s = sub.add_parser("all-clean", parents=[common],
+                       help="One-shot: preprocess → fovmask → filter → droid (good frames only) → viz")
+    s.add_argument("--video", required=True, help="path to source video")
+    s.add_argument("--width", type=int, default=1280)
+    s.add_argument("--fps", type=float, default=15.0)
+    s.add_argument("--distortion-margin", type=float, default=0.15)
+    s.add_argument("--assumed-fov-deg", type=float, default=90.0)
+    s.add_argument("--fov-threshold", type=int, default=12)
+    s.add_argument("--keep-raw", action="store_true")
+    s.add_argument("--intrinsics", default=str(preprocess.DEFAULT_INTRINSICS_PATH))
+    s.add_argument("--calib-model", choices=["pinhole_4param", "pinhole_5param"], default="pinhole_4param")
+    s.add_argument("--no-real-calib", action="store_true")
+    s.add_argument("--max-brightness", type=float, default=140.0, help="filter: washout threshold")
+    s.add_argument("--min-brightness", type=float, default=50.0, help="filter: too-dim threshold")
+    s.add_argument("--max-specular", type=float, default=0.05, help="filter: 0.05 = 5%% specular area")
+    s.add_argument("--droid-root", default=None, help="DROID-SLAM repo path (or $DROID_SLAM_ROOT)")
+    s.add_argument("--weights", default=None, help="droid.pth path (default: $DROID_SLAM_ROOT/droid.pth)")
+    s.add_argument("--stride", type=int, default=1)
+    s.add_argument("--filter-thresh", type=float, default=None,
+                   help="DROID-SLAM motion threshold to consider a frame at all (default 2.4)")
+    s.add_argument("--keyframe-thresh", type=float, default=None,
+                   help="DROID-SLAM motion threshold to keep a permanent keyframe (default 4.0)")
+    s.add_argument("--no-show", action="store_true", default=True)
+    s.set_defaults(func=cmd_all_clean)
 
     return P
 

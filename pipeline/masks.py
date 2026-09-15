@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
 from pathlib import Path
 
 import cv2
@@ -129,6 +130,38 @@ def run_filter(frames_dir: Path, fov_path: Path, out_dir: Path,
     log(STAGE_FILT, f"discarded — washout: {n_bad_bright}, specular: {n_bad_spec}, dim: {n_bad_dim}")
     log(STAGE_FILT, f"metrics → {metrics_csv}", level="ok")
     log(STAGE_FILT, f"good list → {good_txt}", level="ok")
+
+
+def run_materialize_good(frames_dir: Path, good_frames_txt: Path, out_dir: Path) -> int:
+    """Copy only the frames listed in good_frames.txt into out_dir.
+
+    This is the direct-DROID-path equivalent of Stage 5 combine-masks: instead
+    of building a per-pixel mask (which needs a DROID-SLAM fork that accepts
+    --mask_dir), it just excludes whole bad frames from the folder that gets
+    passed as --imagedir -- 100%% compatible with the official demo.py.
+    """
+    out_dir = ensure_dir(out_dir)
+    frames = list_frames(Path(frames_dir))
+    if not frames:
+        raise FileNotFoundError(f"no frames in {frames_dir}")
+
+    good_frames_txt = Path(good_frames_txt)
+    if not good_frames_txt.exists():
+        raise FileNotFoundError(
+            f"{good_frames_txt} not found -- run the filter stage first"
+        )
+    with open(good_frames_txt) as f:
+        good = {int(line.strip()) for line in f if line.strip()}
+
+    n = 0
+    for i, f in enumerate(frames):
+        if i not in good:
+            continue
+        shutil.copy2(f, out_dir / f.name)
+        n += 1
+
+    log(STAGE_FILT, f"materialized {n}/{len(frames)} good frames -> {out_dir}", level="ok")
+    return n
 
 
 # =========================================================================

@@ -7,9 +7,9 @@ Plan: [`PLAN.md`](PLAN.md) · **Ubuntu quickstart: [`UBUNTU_RUN.md`](UBUNTU_RUN.
 
 ---
 
-## 日常工作流程（每次開新 terminal 照這個做）
+## 快速開始
 
-### 0. 啟動環境
+### 0. 每次開新 terminal 都要先做
 
 ```bash
 source ~/miniconda3/etc/profile.d/conda.sh && conda activate droidenv
@@ -17,15 +17,41 @@ export DROID_SLAM_ROOT=$HOME/DROID-SLAM
 cd ~/lung-slam
 ```
 
-### 1. 放檔案 + 決定資料夾命名
+### 1. 放影片
 
-把影片放到 `data/`，`--out` 用一個跟影片對應的獨立名稱（每支影片一個資料夾，不要共用）：
+`--out` 用一個跟影片對應的獨立名稱（每支影片一個資料夾，不要共用）：
 
 ```bash
 cp /path/to/your_video.mov ~/lung-slam/data/
 ```
 
-### 2. preprocess（擷取影格 + FOV 裁切 + 自動產生 calib.txt）
+### 2. 照情境選一個指令跑
+
+| 情境 | 指令 |
+|---|---|
+| 整支影片，正常跑 | `python run.py all-droid --video data/xxx.mp4 --out ./out/xxx` |
+| 整支影片，先濾掉過曝/高光的爛幀 | `python run.py all-clean --video data/xxx.mp4 --out ./out/xxx` |
+| 只要某段幀數範圍（例如第 1490～1940 幀），濾爛幀 | `python run.py all-clean --video data/xxx.mp4 --start 1490 --end 1940 --out ./out/xxx_1490-1940` |
+| 只要某段幀數範圍，不濾爛幀（最快） | `python split_video.py --video data/xxx.mp4 --start 1490 --end 1940 --out ./out/xxx_1490-1940` |
+
+不確定要不要濾爛幀就先跑 `all-droid`（DROID-SLAM 自己會做動作篩選，通常不需要另外濾）；如果重建結果一堆雜訊/飄浮點，再試 `all-clean`。`all-clean` 的過濾門檻是抓其他影片調的，這支內視鏡片段常常濾掉六成以上，跑完可以看 `out/xxx/frame_metrics.csv` 決定要不要用 `--max-brightness`/`--min-brightness`/`--max-specular` 調鬆。
+
+### 3. 看結果
+
+```bash
+python run.py viz-live --out ./out/xxx
+```
+- 拖曳滑鼠旋轉、滾輪縮放
+- `P` 暫停/繼續、`R` 重播、`S`/`A` 放寬/收緊濾波
+- 如果畫面看起來像「多片 2D 貼片脫節」，通常代表深度尺度不穩定，先試試 `--filter-count 4`
+
+---
+
+## 手動逐步執行（除錯 / 需要中途調參數時用）
+
+上面的一行指令都只是把下面幾步串起來；想單獨重跑某一步、或某步失敗要重試，用這裡。
+
+### preprocess（擷取影格 + FOV 裁切 + 自動產生 calib.txt）
 
 ```bash
 python run.py preprocess \
@@ -46,9 +72,9 @@ python run.py preprocess \
 
 **關於 calib.txt 的準確度**：目前預設會自動套用真實 checkerboard 內參（`data/intrinsics.json`，僅當來源影片原生解析度為 1920×1080 時適用）；解析度不符時才會退回用「假設視角角度＋偵測到的圓形半徑」換算出的粗略估計值（`metadata.json` 會標註 `calib_source` 是 `real:...` 還是 heuristic）。想強制用舊的估計值可加 `--no-real-calib`，想指定別的內參檔案用 `--intrinsics`。
 
-#### 想要擷取子片段
+#### 只要某段幀數範圍
 
-只跑整支影片裡的某一段幀數範圍（例如第 1490～1940 幀），用 `split_video.py`，不是 `run.py preprocess`（後者沒有 `--start`/`--end`，只能整支處理）：
+`preprocess` 沒有 `--start`/`--end`，只能整支處理；要裁片段用 `split_video.py`：
 
 ```bash
 python split_video.py \
@@ -60,59 +86,54 @@ python split_video.py \
 
 - `--start` / `--end`：幀數索引（0-based，含頭含尾）
 - 其他參數（`--width`、`--fps`、`--distortion-margin`、`--assumed-fov-deg`、`--intrinsics`、`--calib-model`、`--no-real-calib`）跟 `preprocess` 相同，但 `--fps` 預設值不同：`split_video.py` 預設 0（保留原始 fps），`preprocess` 預設降到 15，想比照平常流程要自己加 `--fps 15`
-- 輸出格式跟 `preprocess` 一樣，接著照常跑下面 3./4. 步驟即可
+- 輸出格式跟 `preprocess` 一樣，接著照常跑下面的 droid/viz-live 步驟即可
 
-### 3. droid（跑 DROID-SLAM）
+### fovmask + filter（濾掉過曝/高光爛幀，`all-clean` 內部做的事）
 
 ```bash
-python run.py droid --out ./out/your_video
+python run.py fovmask --out ./out/your_video
+python run.py filter  --out ./out/your_video
+python run.py materialize-good --out ./out/your_video   # 把留下的乾淨幀複製到 frames_good/
+```
+
+`filter` 只看亮度 + 高光比例（不看模糊度），結果會印在終端機、也存進 `frame_metrics.csv`（每幀數值）跟 `good_frames.txt`（留下的幀 index）。門檻可調：`--max-brightness`（過曝，預設 140）、`--min-brightness`（太暗，預設 50）、`--max-specular`（高光反射比例，預設 0.05 = 5%）。
+
+### droid（跑 DROID-SLAM）
+
+```bash
+python run.py droid --out ./out/your_video                  # 用 out/frames
+python run.py droid --out ./out/your_video --use-filtered   # 改用 out/frames_good（要先跑完 filter + materialize-good）
 ```
 
 跑的過程中會自動跳出「Droid Visualizer」視窗（官方即時預覽，跑完自動關），不用靠它判斷品質好壞，等終端機印出 `outputs: ...` 才算真正跑完。
 
-如果影片動作幅度小、keyframe 太少（可以先跑一次看 log 印出的 keyframe 數 / `tstamps.npy` 的間距），可以調低這兩個門檻拿到更多 keyframe：
+**篩選 keyframe**：`--filter-thresh`（預設 2.4，決定一幀有沒有資格被考慮）跟 `--keyframe-thresh`（預設 4.0，決定收進來的幀要不要因為跟鄰居太像而被刪）都是純粹看 DROID 網路估出來的光流大小，跟畫質（模糊/高光）無關。如果影片動作幅度小、keyframe 太少，可以調低這兩個門檻拿到更多 keyframe：
 
 ```bash
 python run.py droid --out ./out/your_video --filter-thresh 1.5 --keyframe-thresh 3.0
 ```
 
-注意：如果 keyframe 之間仍有長時間的大空洞，通常不是門檻問題，而是那段時間鏡頭本身動得太少（軟組織蠕動為主、沒有真實平移）——這種情況再降門檻只會生出退化的重複幀，對重建沒有幫助，該考慮換一段動作幅度更大的片段。
+注意：如果 keyframe 之間仍有長時間的大空洞，通常不是門檻問題，而是那段時間鏡頭本身動得太少（軟組織蠕動為主、沒有真實平移）——這種情況再降門檻只會生出退化的重複幀，對重建沒有幫助，該考慮換一段動作幅度更大的片段。想「只保留乾淨幀、其餘全當 keyframe」在物理上也行不通：相機沒移動的時段本來就沒有新的 3D 資訊可以三角測量，跟門檻無關。
 
-### 4. viz-live（檢查最終結果）
+### viz-live（檢查最終結果）
 
-```bash
-python run.py viz-live --out ./out/your_video
-```
-- 拖曳滑鼠旋轉、滾輪縮放
-- `P` 暫停/繼續、`R` 重播、`S`/`A` 放寬/收緊濾波
-- 如果畫面看起來像「多片 2D 貼片脫節」，通常代表深度尺度不穩定，先試試 `--filter-count 4`：
 ```bash
 python run.py viz-live --out ./out/your_video --filter-count 4
 ```
+`--filter-count`：至少幾個視角同意才保留一個 3D 點，預設 2，畫面「多片脫節」時可試試調高。
 
-### 一行懶人版
+---
 
-等同 preprocess + droid + viz 三步，仍建議跑完後另外執行 `viz-live`：
+## 指令總覽（一行懶人版）
 
-```bash
-python run.py all-droid --video data/your_video.mov --out ./out/your_video
-```
+| 指令 | 等同於 | 用途 |
+|---|---|---|
+| `run.py all-droid --video ... --out ...` | preprocess → droid → viz | 整支影片，直接跑（推薦起手式） |
+| `run.py all-clean --video ... --out ...` | preprocess → fovmask → filter → materialize-good → droid → viz | 整支影片，先濾掉爛幀再跑 |
+| `run.py all-clean --video ... --start N --end M --out ...` | 同上，限定幀數範圍 | 只測某一段 |
+| `split_video.py --video ... --start N --end M --out ...` | 同 preprocess，限定幀數範圍 | 只裁片段，不跑 droid |
 
-### 一行懶人版（含爛幀過濾）
-
-跟上面一樣，但先跑 `fovmask`/`filter` 把過曝/高光的幀濾掉，droid 只吃剩下的乾淨幀（見上面「篩選 keyframe」章節的說明——這只控制哪些幀有資格被考慮，不代表全部都會變 keyframe，DROID 自己的動作篩選還是照跑）：
-
-```bash
-python run.py all-clean --video data/your_video.mov --out ./out/your_video
-```
-
-跑完會多出 `out/your_video/{fov_mask.png, frame_metrics.csv, good_frames.txt, frames_good/}`。想調過濾門檻可以加 `--max-brightness`/`--min-brightness`/`--max-specular`（跟單獨跑 `filter` 一樣，預設值也一樣，見 README 警告：目前門檻是抓其他影片調的，這支內視鏡片段常常過濾掉六成以上，先看 `frame_metrics.csv` 再決定要不要調鬆）。
-
-也支援只處理某段幀數範圍（跟 `split_video.py` 一樣），加 `--start`/`--end`（兩個要一起給）：
-
-```bash
-python run.py all-clean --video data/your_video.mov --start 1490 --end 1940 --out ./out/your_video_1490-1940
-```
+三個 `all-*` 指令跑完仍建議另外執行一次 `viz-live` 確認結果。
 
 ---
 
@@ -135,7 +156,7 @@ to drop peripheral distortion → crop to inscribed square → emit DROID-SLAM
 100% compatible with the official
 [DROID-SLAM `demo.py`](https://github.com/princeton-vl/DROID-SLAM).
 
-See the daily workflow above for the exact commands.
+See the quick start above for the exact commands (`all-droid` / `all-clean`).
 
 ### B) Full pipeline with SAM 2 tool masking (advanced)
 
@@ -197,7 +218,7 @@ Video files and model weights are **not** committed — transfer via `rsync` or
 
 ## First-time setup on a new Ubuntu machine
 
-Once per machine — after this, use the daily workflow above. Full detail
+Once per machine — after this, use the quick start above. Full detail
 (troubleshooting, version pins) is in [`UBUNTU_RUN.md`](UBUNTU_RUN.md).
 
 ```bash
@@ -221,8 +242,10 @@ python run.py check
 Outputs of the pipeline land in `out/<name>/`:
 ```
 frames/          cropped rectangular PNGs fed to DROID-SLAM
+frames_good/     (all-clean only) frames/ minus the ones filter dropped
 calib.txt        "fx fy cx cy" (+ distortion if using real calibration)
 preview.png      overlay: yellow=raw FOV, red=distortion-trimmed, green=final crop
+frame_metrics.csv / good_frames.txt   (all-clean only) per-frame filter metrics + kept indices
 droid/           DROID-SLAM reconstruction (poses.npy, disps.npy, ...)
 viz/             trajectory + point cloud renders
 ```

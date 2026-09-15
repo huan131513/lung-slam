@@ -98,7 +98,7 @@ python split_video.py \
 
 ```bash
 python run.py fovmask --out ./out/your_video
-python run.py filter  --out ./out/your_video
+python run.py filter  --out ./out/your_video --max-brightness 140 --min-brightness 50 --max-specular 0.05
 python run.py materialize-good --out ./out/your_video   # 把留下的乾淨幀複製到 frames_good/
 ```
 
@@ -107,7 +107,7 @@ python run.py materialize-good --out ./out/your_video   # 把留下的乾淨幀�
 ### droid（跑 DROID-SLAM）
 
 ```bash
-python run.py droid --out ./out/your_video                  # 用 out/frames
+python run.py droid --out ./out/your_video --filter-thresh -1 --keyframe-thresh -1              # 用 out/frames
 python run.py droid --out ./out/your_video --use-filtered   # 改用 out/frames_good（要先跑完 filter + materialize-good）
 ```
 

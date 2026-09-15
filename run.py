@@ -109,6 +109,7 @@ def cmd_filter(args):
         max_brightness=args.max_brightness,
         max_specular=args.max_specular,
         min_brightness=args.min_brightness,
+        min_lap_var=getattr(args, "min_lap_var", 0.0),
     )
 
 
@@ -329,10 +330,14 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("fovmask", parents=[common], help="Stage 2: circular FOV mask from first frame")
     s.set_defaults(func=cmd_fovmask)
 
-    s = sub.add_parser("filter", parents=[common], help="Stage 3: bad-frame filter (washout / specular)")
+    s = sub.add_parser("filter", parents=[common], help="Stage 3: bad-frame filter (washout / specular / blur)")
     s.add_argument("--max-brightness", type=float, default=140.0)
     s.add_argument("--min-brightness", type=float, default=50.0)
     s.add_argument("--max-specular", type=float, default=0.05, help="0.05 = 5%%")
+    s.add_argument("--min-lap-var", type=float, default=0.0,
+                   help="reject frames blurrier than this (Laplacian variance in FOV, lower = "
+                        "blurrier); default 0.0 = blur filtering off -- clip-specific, measure "
+                        "frame_metrics.csv first (see README)")
     s.set_defaults(func=cmd_filter)
 
     s = sub.add_parser("materialize-good", parents=[common],
@@ -415,6 +420,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-brightness", type=float, default=140.0)
     s.add_argument("--min-brightness", type=float, default=50.0)
     s.add_argument("--max-specular", type=float, default=0.05)
+    s.add_argument("--min-lap-var", type=float, default=0.0)
     s.add_argument("--key-seconds", default="8,12,30,44")
     s.add_argument("--method", choices=["heuristic", "colmap"], default="heuristic")
     s.add_argument("--fov-deg", type=float, default=70.0)
@@ -470,6 +476,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-brightness", type=float, default=140.0, help="filter: washout threshold")
     s.add_argument("--min-brightness", type=float, default=50.0, help="filter: too-dim threshold")
     s.add_argument("--max-specular", type=float, default=0.05, help="filter: 0.05 = 5%% specular area")
+    s.add_argument("--min-lap-var", type=float, default=0.0,
+                   help="filter: reject blurrier frames (Laplacian variance in FOV); 0.0 = off")
     s.add_argument("--droid-root", default=None, help="DROID-SLAM repo path (or $DROID_SLAM_ROOT)")
     s.add_argument("--weights", default=None, help="droid.pth path (default: $DROID_SLAM_ROOT/droid.pth)")
     s.add_argument("--stride", type=int, default=1)

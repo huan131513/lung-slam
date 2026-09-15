@@ -84,7 +84,15 @@ def compute_frame_metrics(img: np.ndarray, fov: np.ndarray) -> dict:
 def run_filter(frames_dir: Path, fov_path: Path, out_dir: Path,
                max_brightness: float = 140.0,
                max_specular: float = 0.05,
-               min_brightness: float = 50.0) -> None:
+               min_brightness: float = 50.0,
+               min_lap_var: float = 0.0) -> None:
+    """min_lap_var: reject frames blurrier than this (Laplacian variance within
+    FOV -- lower means blurrier). Default 0.0 disables blur filtering entirely,
+    since -- like brightness/specular -- a good absolute cutoff is clip-specific
+    (light level and texture both shift the whole lap_var distribution); measure
+    a clip's own frame_metrics.csv first (e.g. run with all thresholds disabled)
+    and pick something like its own p5-p10 percentile.
+    """
     out_dir = ensure_dir(out_dir)
     frames = list_frames(Path(frames_dir))
     fov = cv2.imread(str(fov_path), cv2.IMREAD_GRAYSCALE)
@@ -92,7 +100,8 @@ def run_filter(frames_dir: Path, fov_path: Path, out_dir: Path,
         raise FileNotFoundError(fov_path)
 
     log(STAGE_FILT, f"filtering {len(frames)} frames")
-    log(STAGE_FILT, f"thresholds: {min_brightness} ≤ brightness ≤ {max_brightness}, specular ≤ {max_specular*100:.1f}%")
+    log(STAGE_FILT, f"thresholds: {min_brightness} ≤ brightness ≤ {max_brightness}, "
+                     f"specular ≤ {max_specular*100:.1f}%, lap_var ≥ {min_lap_var}")
 
     metrics_csv = out_dir / "frame_metrics.csv"
     good_txt = out_dir / "good_frames.txt"
@@ -105,6 +114,7 @@ def run_filter(frames_dir: Path, fov_path: Path, out_dir: Path,
         n_bad_bright = 0
         n_bad_spec = 0
         n_bad_dim = 0
+        n_bad_blur = 0
 
         for i, f in enumerate(progress(frames, total=len(frames), desc="filter")):
             img = cv2.imread(str(f))
@@ -119,6 +129,9 @@ def run_filter(frames_dir: Path, fov_path: Path, out_dir: Path,
             elif m["brightness"] < min_brightness:
                 is_good = False
                 n_bad_dim += 1
+            elif m["lap_var"] < min_lap_var:
+                is_good = False
+                n_bad_blur += 1
 
             writer.writerow([i, f.name, f"{m['brightness']:.2f}", f"{m['specular']:.4f}",
                              f"{m['lap_var']:.1f}", int(is_good)])
@@ -127,7 +140,7 @@ def run_filter(frames_dir: Path, fov_path: Path, out_dir: Path,
                 n_good += 1
 
     log(STAGE_FILT, f"good frames: {n_good}/{len(frames)} ({100*n_good/len(frames):.1f}%)", level="ok")
-    log(STAGE_FILT, f"discarded — washout: {n_bad_bright}, specular: {n_bad_spec}, dim: {n_bad_dim}")
+    log(STAGE_FILT, f"discarded — washout: {n_bad_bright}, specular: {n_bad_spec}, dim: {n_bad_dim}, blur: {n_bad_blur}")
     log(STAGE_FILT, f"metrics → {metrics_csv}", level="ok")
     log(STAGE_FILT, f"good list → {good_txt}", level="ok")
 

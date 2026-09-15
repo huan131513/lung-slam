@@ -102,7 +102,15 @@ python run.py filter  --out ./out/your_video
 python run.py materialize-good --out ./out/your_video   # 把留下的乾淨幀複製到 frames_good/
 ```
 
-`filter` 只看亮度 + 高光比例（不看模糊度），結果會印在終端機、也存進 `frame_metrics.csv`（每幀數值）跟 `good_frames.txt`（留下的幀 index）。門檻可調：`--max-brightness`（過曝，預設 140）、`--min-brightness`（太暗，預設 50）、`--max-specular`（高光反射比例，預設 0.05 = 5%）。
+`filter` 看亮度、高光比例、模糊度三種指標，結果會印在終端機、也存進 `frame_metrics.csv`（每幀數值）跟 `good_frames.txt`（留下的幀 index）。門檻可調：`--max-brightness`（過曝，預設 140）、`--min-brightness`（太暗，預設 50）、`--max-specular`（高光反射比例，預設 0.05 = 5%）、`--min-lap-var`（模糊度下限，Laplacian variance，數值越低代表越模糊，預設 0.0 = 不濾模糊）。
+
+⚠️ **這些門檻（除了 `--min-lap-var`）都是絕對數值，但亮度/高光/清晰度的「正常範圍」因片段而異**（同一台內視鏡不同片段亮度中位數可以差到 30 以上）——固定門檻在某些片段會濾過頭、某些片段又濾不到。建議先跑一次不濾的 filter 只為了拿 `frame_metrics.csv`：
+
+```bash
+python run.py filter --out ./out/xxx --max-brightness 255 --max-specular 1.0 --min-brightness 0
+```
+
+再看那份 CSV 的分佈（brightness/specular 抓 p90~p95、lap_var 抓 p5~p10 當門檻），才跑真正會濾掉東西的那次。
 
 ### droid（跑 DROID-SLAM）
 

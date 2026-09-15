@@ -108,6 +108,12 @@ python run.py all-clean --video data/your_video.mov --out ./out/your_video
 
 跑完會多出 `out/your_video/{fov_mask.png, frame_metrics.csv, good_frames.txt, frames_good/}`。想調過濾門檻可以加 `--max-brightness`/`--min-brightness`/`--max-specular`（跟單獨跑 `filter` 一樣，預設值也一樣，見 README 警告：目前門檻是抓其他影片調的，這支內視鏡片段常常過濾掉六成以上，先看 `frame_metrics.csv` 再決定要不要調鬆）。
 
+也支援只處理某段幀數範圍（跟 `split_video.py` 一樣），加 `--start`/`--end`（兩個要一起給）：
+
+```bash
+python run.py all-clean --video data/your_video.mov --start 1490 --end 1940 --out ./out/your_video_1490-1940
+```
+
 ---
 
 ## Pipeline at a glance

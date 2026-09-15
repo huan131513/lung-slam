@@ -78,7 +78,7 @@ python run.py preprocess \
 
 **關於 calib.txt 的準確度**：目前預設會自動套用真實 checkerboard 內參（`data/intrinsics.json`，僅當來源影片原生解析度為 1920×1080 時適用）；解析度不符時才會退回用「假設視角角度＋偵測到的圓形半徑」換算出的粗略估計值（`metadata.json` 會標註 `calib_source` 是 `real:...` 還是 heuristic）。想強制用舊的估計值可加 `--no-real-calib`，想指定別的內參檔案用 `--intrinsics`。
 
-#### 只要某段幀數範圍
+#### 只要某段幀數範圍 （可取代上方preprocess流程）
 
 `preprocess` 沒有 `--start`/`--end`，只能整支處理；要裁片段用 `split_video.py`：
 

@@ -36,6 +36,12 @@ cp /path/to/your_video.mov ~/lung-slam/data/
 
 不確定要不要濾爛幀就先跑 `all-droid`（DROID-SLAM 自己會做動作篩選，通常不需要另外濾）；如果重建結果一堆雜訊/飄浮點，再試 `all-clean`。`all-clean` 的過濾門檻是抓其他影片調的，這支內視鏡片段常常濾掉六成以上，跑完可以看 `out/xxx/frame_metrics.csv` 決定要不要用 `--max-brightness`/`--min-brightness`/`--max-specular` 調鬆。
 
+兩個 `all-*` 指令也都接受 `droid` stage 的門檻參數（keyframe 太少時用，見下面「篩選 keyframe」說明）：
+
+```bash
+python run.py all-clean --video data/xxx.mp4 --out ./out/xxx --filter-thresh 1.5 --keyframe-thresh 3.0
+```
+
 ### 3. 看結果
 
 ```bash

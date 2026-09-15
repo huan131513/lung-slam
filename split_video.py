@@ -38,10 +38,22 @@ def extract_frame_range(video: Path, out_dir: Path, start: int, end: int,
     out_h = int(round(sh * scale / 2) * 2)
     log(STAGE, f"src {sw}x{sh}@{src_fps:.2f}fps  ->  {target_width}x{out_h}, frames [{start},{end}]")
 
-    vf = f"select=between(n\\,{start}\\,{end}),scale={target_width}:{out_h}"
+    # Downsample by picking every Nth frame *inside* the select expression
+    # itself, rather than chaining a separate `fps=` filter after `select`.
+    # `select` doesn't reset PTS, so a trailing `fps=` filter sees the
+    # *original* (huge, since we selected deep into the video) timestamps and
+    # reads them as "a long gap to fill" -- it then duplicates frames to
+    # cover that gap, silently producing far more output frames than the
+    # selected range actually has (a `setpts=PTS-STARTPTS` fixup doesn't
+    # help either -- tested, still over-generates). Picking the stride via
+    # `mod()` inside `select` sidesteps the fps filter, and PTS, entirely.
+    sel = f"between(n\\,{start}\\,{end})"
+    step = 1
     if target_fps and target_fps < src_fps:
-        vf += f",fps={target_fps}"
-        log(STAGE, f"downsampling fps -> {target_fps}")
+        step = max(1, round(src_fps / target_fps))
+        log(STAGE, f"downsampling fps -> ~{src_fps/step:.2f} (every {step}th frame)")
+        sel = f"({sel})*not(mod(n-{start}\\,{step}))"
+    vf = f"select='{sel}',scale={target_width}:{out_h}"
 
     cmd = [
         "ffmpeg", "-y", "-i", str(video), "-vf", vf,

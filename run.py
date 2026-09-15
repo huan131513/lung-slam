@@ -30,6 +30,7 @@ import argparse
 import sys
 from pathlib import Path
 
+import split_video
 from pipeline import calib, droid_runner, extract, masks, preprocess, sam2_runner, viz, viz_live, viz_sync
 from pipeline.common import bold, cyan, log, probe_env, section
 
@@ -244,9 +245,30 @@ def cmd_all_clean(args):
     top of whatever "good" frames remain — this only controls what's eligible,
     not which of those become keyframes (see --filter-thresh/--keyframe-thresh
     on the droid stage for that).
+
+    If --start/--end are both given, restricts to that frame range first
+    (same as split_video.py) instead of processing the whole video.
     """
     section("ALL-CLEAN: preprocess → fovmask → filter → droid (good frames only) → viz")
-    cmd_preprocess(args)
+    start, end = getattr(args, "start", None), getattr(args, "end", None)
+    if (start is None) != (end is None):
+        log("all-clean", "--start and --end must be given together", level="err")
+        raise SystemExit(2)
+    if start is not None and end is not None:
+        p = paths(args.out)
+        fps = args.fps if args.fps and args.fps > 0 else None
+        split_video.run(
+            video=Path(args.video), out_dir=p["out"], start=start, end=end,
+            target_width=args.width, target_fps=fps,
+            distortion_margin=args.distortion_margin,
+            assumed_fov_deg=args.assumed_fov_deg,
+            fov_threshold=args.fov_threshold,
+            keep_raw=args.keep_raw,
+            intrinsics_path=(None if args.no_real_calib else Path(args.intrinsics)),
+            calib_model=args.calib_model,
+        )
+    else:
+        cmd_preprocess(args)
     cmd_fovmask(args)
     cmd_filter(args)
     cmd_materialize_good(args)
@@ -432,6 +454,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("all-clean", parents=[common],
                        help="One-shot: preprocess → fovmask → filter → droid (good frames only) → viz")
     s.add_argument("--video", required=True, help="path to source video")
+    s.add_argument("--start", type=int, default=None,
+                   help="start frame index, inclusive 0-based (optional; must be given with --end "
+                        "to restrict to a frame range instead of the whole video, same as split_video.py)")
+    s.add_argument("--end", type=int, default=None, help="end frame index, inclusive")
     s.add_argument("--width", type=int, default=1280)
     s.add_argument("--fps", type=float, default=15.0)
     s.add_argument("--distortion-margin", type=float, default=0.15)

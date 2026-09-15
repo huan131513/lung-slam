@@ -242,10 +242,11 @@ def cmd_all_clean(args):
     preprocess -> fovmask -> filter -> materialize good frames -> droid -> viz.
     Drops washed-out / specular-glare frames (Stage 3) before DROID-SLAM ever
     sees them, by excluding whole files from --imagedir (no --mask_dir fork
-    needed). DROID-SLAM still runs its own motion-based keyframe selection on
-    top of whatever "good" frames remain — this only controls what's eligible,
-    not which of those become keyframes (see --filter-thresh/--keyframe-thresh
-    on the droid stage for that).
+    needed). --filter-thresh/--keyframe-thresh default to -1 here (unlike the
+    standalone `droid` stage), which disables DROID-SLAM's own motion-based
+    keyframe selection entirely -- every frame that survived Stage 3 is kept
+    as a permanent keyframe. Pass 2.4/4.0 to restore official demo.py
+    behavior (Stage 3 filtering only, DROID still picks keyframes by motion).
 
     If --start/--end are both given, restricts to that frame range first
     (same as split_video.py) instead of processing the whole video.
@@ -481,10 +482,19 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--droid-root", default=None, help="DROID-SLAM repo path (or $DROID_SLAM_ROOT)")
     s.add_argument("--weights", default=None, help="droid.pth path (default: $DROID_SLAM_ROOT/droid.pth)")
     s.add_argument("--stride", type=int, default=1)
-    s.add_argument("--filter-thresh", type=float, default=None,
-                   help="DROID-SLAM motion threshold to consider a frame at all (default 2.4)")
-    s.add_argument("--keyframe-thresh", type=float, default=None,
-                   help="DROID-SLAM motion threshold to keep a permanent keyframe (default 4.0)")
+    s.add_argument("--filter-thresh", type=float, default=-1.0,
+                   help="DROID-SLAM motion threshold to consider a frame at all "
+                        "(demo.py default 2.4). all-clean defaults to -1 (disabled -- every "
+                        "frame that survived Stage 3 filtering is used) since the filter stage "
+                        "already excluded the frames that shouldn't be trusted; pass 2.4 to "
+                        "restore official demo.py behavior")
+    s.add_argument("--keyframe-thresh", type=float, default=-1.0,
+                   help="DROID-SLAM motion threshold to keep a permanent keyframe "
+                        "(demo.py default 4.0). all-clean defaults to -1 (disabled -- every "
+                        "ingested frame is kept as a keyframe, none pruned as redundant); pass "
+                        "4.0 to restore official demo.py behavior. See README: this doesn't "
+                        "create new 3D information during near-static stretches, and more "
+                        "keyframes means heavier/slower backend optimization")
     s.add_argument("--no-show", action="store_true", default=True)
     s.set_defaults(func=cmd_all_clean)
 

@@ -29,17 +29,23 @@ cp /path/to/your_video.mov ~/lung-slam/data/
 
 | 情境 | 指令 |
 |---|---|
-| 整支影片，正常跑 | `python run.py all-droid --video data/xxx.mp4 --out ./out/xxx` |
-| 整支影片，先濾掉過曝/高光的爛幀 | `python run.py all-clean --video data/xxx.mp4 --out ./out/xxx` |
+| 整支影片，正常跑（DROID 自己做動作篩選 keyframe） | `python run.py all-droid --video data/xxx.mp4 --out ./out/xxx` |
+| 整支影片，先濾掉過曝/高光/模糊的爛幀，濾完全部當 keyframe | `python run.py all-clean --video data/xxx.mp4 --out ./out/xxx` |
 | 只要某段幀數範圍（例如第 1490～1940 幀），濾爛幀 | `python run.py all-clean --video data/xxx.mp4 --start 1490 --end 1940 --out ./out/xxx_1490-1940` |
 | 只要某段幀數範圍，不濾爛幀（最快） | `python split_video.py --video data/xxx.mp4 --start 1490 --end 1940 --out ./out/xxx_1490-1940` |
 
-不確定要不要濾爛幀就先跑 `all-droid`（DROID-SLAM 自己會做動作篩選，通常不需要另外濾）；如果重建結果一堆雜訊/飄浮點，再試 `all-clean`。`all-clean` 的過濾門檻是抓其他影片調的，這支內視鏡片段常常濾掉六成以上，跑完可以看 `out/xxx/frame_metrics.csv` 決定要不要用 `--max-brightness`/`--min-brightness`/`--max-specular` 調鬆。
+不確定要不要濾爛幀就先跑 `all-droid`（DROID-SLAM 自己會做動作篩選，通常不需要另外濾）；如果重建結果一堆雜訊/飄浮點，再試 `all-clean`。`all-clean` 的過濾門檻是抓其他影片調的，這支內視鏡片段常常濾掉六成以上，跑完可以看 `out/xxx/frame_metrics.csv` 決定要不要用 `--max-brightness`/`--min-brightness`/`--max-specular`/`--min-lap-var` 調鬆。
 
-兩個 `all-*` 指令也都接受 `droid` stage 的門檻參數（keyframe 太少時用，見下面「篩選 keyframe」說明）：
+**`all-clean` 的 `--filter-thresh`/`--keyframe-thresh` 預設是 `-1`**（跟 `all-droid`/單獨跑 `droid` 不一樣，那兩個維持官方預設 2.4/4.0）：等於關掉 DROID 自己的動作篩選，Stage 3 濾出來的乾淨幀會**全部**變成 keyframe，不再看動了多少。想恢復 DROID 官方的動作篩選（只有動作夠大的幀才變 keyframe），自己帶回 `2.4`/`4.0`：
 
 ```bash
-python run.py all-clean --video data/xxx.mp4 --out ./out/xxx --filter-thresh 1.5 --keyframe-thresh 3.0
+python run.py all-clean --video data/xxx.mp4 --out ./out/xxx --filter-thresh 2.4 --keyframe-thresh 4.0
+```
+
+keyframe 太少想調鬆一點（但沒有完全關掉）用中間值：
+
+```bash
+python run.py all-droid --video data/xxx.mp4 --out ./out/xxx --filter-thresh 1.5 --keyframe-thresh 3.0
 ```
 
 ### 3. 看結果
@@ -121,13 +127,13 @@ python run.py droid --out ./out/your_video --use-filtered   # 改用 out/frames_
 
 跑的過程中會自動跳出「Droid Visualizer」視窗（官方即時預覽，跑完自動關），不用靠它判斷品質好壞，等終端機印出 `outputs: ...` 才算真正跑完。
 
-**篩選 keyframe**：`--filter-thresh`（預設 2.4，決定一幀有沒有資格被考慮）跟 `--keyframe-thresh`（預設 4.0，決定收進來的幀要不要因為跟鄰居太像而被刪）都是純粹看 DROID 網路估出來的光流大小，跟畫質（模糊/高光）無關。如果影片動作幅度小、keyframe 太少，可以調低這兩個門檻拿到更多 keyframe：
+**篩選 keyframe**：`--filter-thresh`（demo.py 預設 2.4，決定一幀有沒有資格被考慮）跟 `--keyframe-thresh`（demo.py 預設 4.0，決定收進來的幀要不要因為跟鄰居太像而被刪）都是純粹看 DROID 網路估出來的光流大小，跟畫質（模糊/高光）無關。如果影片動作幅度小、keyframe 太少，可以調低這兩個門檻拿到更多 keyframe：
 
 ```bash
 python run.py droid --out ./out/your_video --filter-thresh 1.5 --keyframe-thresh 3.0
 ```
 
-注意：如果 keyframe 之間仍有長時間的大空洞，通常不是門檻問題，而是那段時間鏡頭本身動得太少（軟組織蠕動為主、沒有真實平移）——這種情況再降門檻只會生出退化的重複幀，對重建沒有幫助，該考慮換一段動作幅度更大的片段。想「只保留乾淨幀、其餘全當 keyframe」在物理上也行不通：相機沒移動的時段本來就沒有新的 3D 資訊可以三角測量，跟門檻無關。
+兩個都設 `-1` 會直接關掉篩選——收進來的幀全部變 keyframe（`all-clean` 預設就是這樣，見上面快速開始）。代價：keyframe 之間如果本來就是長時間的大空洞（那段時間鏡頭本身動得太少，軟組織蠕動為主、沒有真實平移），硬留下來的是近乎重複、零視角差的退化幀——不會生出新的 3D 資訊（相機沒動，物理上就是沒東西可以三角測量），只會讓 backend 要優化的 keyframe 變多、變慢。要不要用這個預設，看你要的是「trajectory 密一點方便後續處理」還是「重建品質」。
 
 ### viz-live（檢查最終結果）
 
